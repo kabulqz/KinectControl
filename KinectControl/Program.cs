@@ -12,6 +12,8 @@ namespace KinectControl
     internal class Program
     {
         private const int FPS = 58; // has to be this value to avoid flickering
+        private readonly DrawingGroup drawingGroup;
+
         private readonly DispatcherTimer timer;
         private readonly MainWindow mainWindow;
         private readonly Kinect kinect;
@@ -21,57 +23,59 @@ namespace KinectControl
             mainWindow = window;
             kinect = new Kinect(mainWindow);
 
+            drawingGroup = new DrawingGroup();
+            var drawingImage = new DrawingImage(drawingGroup);
+            var renderedImage = new Image
+            {
+                Width = mainWindow.Width,
+                Height = mainWindow.Height,
+                Source = drawingImage
+            };
+            mainWindow.Canvas.Children.Add(renderedImage);
+
             timer = new DispatcherTimer
             {
                 Interval = TimeSpan.FromMilliseconds((int)(1000 / FPS))
             };
             timer.Tick += Render;
             timer.Start();
-
         }
 
         private void Render(object sender, EventArgs e)
         {
-            mainWindow.Canvas.Children.Clear();
-            kinect.ProcessBodyData();
-
-#if DEBUG
-            mainWindow.Canvas.Background = new SolidColorBrush(Color.FromRgb(0x17, 0x17, 0x17));
-#endif
-            SolidColorBrush controllingBrush = new SolidColorBrush(Color.FromArgb(App.Alpha, 0xFF, 0xFF, 0xFF));
-            if (kinect.controllingPerson != null)
+            using (var dc = drawingGroup.Open())
             {
-                controllingBrush = new SolidColorBrush(kinect.colorManager.AssignColor(kinect.controllingPerson.TrackingId));
+                kinect.ProcessBodyData(dc);
+
+                var controllingBrush = new SolidColorBrush(Color.FromArgb(App.Alpha, 0xFF, 0xFF, 0xFF));
+                if (kinect.controllingPerson != null)
+                {
+                    controllingBrush = new SolidColorBrush(kinect.colorManager.AssignColor(kinect.controllingPerson.TrackingId));
+                }
+                var controllingRect = new Rect
+                {
+                    Width = 120,
+                    Height = 12,
+                    X = mainWindow.Width / 2 - 60,
+                    Y = 10
+                };
+                dc.DrawRoundedRectangle(controllingBrush, null, controllingRect, 5.0f, 5.0f);
+
+                var statusBrush = new SolidColorBrush(kinect.IsAvailable()
+                    ? Color.FromArgb(App.Alpha, 0x60, 0xD3, 0x94)
+                    : Color.FromArgb(App.Alpha, 0xAF, 0x1B, 0x3F));
+                var statusRect = new Rect
+                {
+                    Width = mainWindow.Width - 10,
+                    Height = mainWindow.Height - 10,
+                    X = 5,
+                    Y = 5
+                };
+                dc.DrawRoundedRectangle(null, new Pen(statusBrush, 5), statusRect, 5.0f, 5.0f);
+                kinect.RemoveUntrackedBodies();
+
+                drawingGroup.ClipGeometry = new RectangleGeometry(new Rect(0, 0, mainWindow.Width, mainWindow.Height));
             }
-            var controllingRect = new Rectangle
-            {
-                Width = 120,
-                Height = 12,
-                RadiusX = 5,
-                RadiusY = 5,
-                Fill = controllingBrush
-            };
-            Canvas.SetLeft(controllingRect, (mainWindow.Width - controllingRect.Width) / 2);
-            Canvas.SetTop(controllingRect, 10);
-            mainWindow.Canvas.Children.Add(controllingRect);
-
-            var statusRect = new Rectangle
-            {
-                Width = mainWindow.Width - 6,
-                Height = mainWindow.Height - 6,
-                RadiusX = 5,
-                RadiusY = 5,
-                Stroke = new SolidColorBrush(kinect.IsAvailable() ? 
-                    Color.FromArgb(App.Alpha, 0x60, 0xD3, 0x94) : 
-                    Color.FromArgb(App.Alpha, 0xAF, 0x1B, 0x3F)),
-                StrokeThickness = 5,
-                Fill = Brushes.Transparent,
-            };
-            Canvas.SetLeft(statusRect, 3);
-            Canvas.SetTop(statusRect, 3);
-            mainWindow.Canvas.Children.Add(statusRect);
-
-            kinect.RemoveUntrackedBodies();
         }
     }
 }

@@ -1,13 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
+
 using Microsoft.Kinect;
 using Microsoft.Kinect.VisualGestureBuilder;
 
@@ -15,13 +14,12 @@ namespace KinectControl
 {
     internal class Kinect
     {
-        private MainWindow mainWindow;
-        public ColorManager colorManager;
+        private readonly MainWindow mainWindow;
+        public readonly ColorManager colorManager;
 
+        private Body[] bodies;
         private KinectSensor sensor;
-        private BodyFrameSource bodyFrameSource;
         private BodyFrameReader bodyFrameReader;
-        private readonly Body[] bodies;
         private readonly List<Tuple<JointType, JointType>> bonePairs = new List<Tuple<JointType, JointType>>
         {
             new Tuple<JointType, JointType>(JointType.Head, JointType.Neck),
@@ -48,94 +46,86 @@ namespace KinectControl
             new Tuple<JointType, JointType>(JointType.KneeRight, JointType.AnkleRight),
             new Tuple<JointType, JointType>(JointType.AnkleRight, JointType.FootRight),
         };
-        private readonly Dictionary<ulong, Dictionary<JointType, System.Windows.Point>> smoothedJoints;
+        private readonly Dictionary<ulong, Dictionary<JointType, Point>> smoothedJoints;
         private readonly List<ulong> currentTrackedIds;
         private List<ulong> previousTrackedIds;
-        public Body controllingPerson = null;
+        public Body controllingPerson;
+
+        private List<GestureDetector> gestureDetectorList;
 
         public Kinect(MainWindow window)
         {
             mainWindow = window;
             colorManager = new ColorManager();
 
-            bodies = new Body[6];
-            smoothedJoints = new Dictionary<ulong, Dictionary<JointType, System.Windows.Point>>();
+            sensor = KinectSensor.GetDefault();
+            bodies = new Body[sensor.BodyFrameSource.BodyCount];
+            smoothedJoints = new Dictionary<ulong, Dictionary<JointType, Point>>();
             currentTrackedIds = new List<ulong>();
             previousTrackedIds = new List<ulong>();
 
-            if (!InitializeKinect())
+            sensor.Open();
+            bodyFrameReader = sensor.BodyFrameSource.OpenReader();
+
+            gestureDetectorList = new List<GestureDetector>();
+            for (int i = 0; i < sensor.BodyFrameSource.BodyCount; i++)
             {
-                Console.WriteLine(@"Kinect initialization failed");
-                return;
+                GestureResultView result = new GestureResultView(i, false, false, 0.0f);
+                GestureDetector detector = new GestureDetector(sensor, result);
+                gestureDetectorList.Add(detector);
             }
+
             Console.WriteLine(@"Kinect initialized successfully");
         }
 
-        private bool InitializeKinect()
-        {
-            sensor = KinectSensor.GetDefault();
-            if (sensor == null)
-            {
-                Console.WriteLine(@"No Kinect sensor found");
-                return false;
-            }
-
-            sensor.Open();
-            bodyFrameSource = sensor.BodyFrameSource;
-            if (bodyFrameSource == null)
-            {
-                Console.WriteLine(@"Error: Couldn't get body frame source");
-                return false;
-            }
-
-            bodyFrameReader = bodyFrameSource.OpenReader();
-            if (bodyFrameReader == null)
-            {
-                Console.WriteLine(@"Error: Couldn't open body frame reader");
-                return false;
-            }
-
-            return true;
-        }
-
-        public void ProcessBodyData()
+        public void ProcessBodyData(DrawingContext drawingContext)
         {
             var bodyFrame = bodyFrameReader.AcquireLatestFrame();
+            if (bodyFrame == null) return;
 
-            if (bodyFrame != null)
+            bodyFrame.GetAndRefreshBodyData(bodies);
+
+            ulong highestTrackingId = 0;
+            Body newControllingPerson = null;
+            currentTrackedIds.Clear();
+
+            for(int i = 0; i < sensor.BodyFrameSource.BodyCount; i++)
             {
-                try
+                var body = bodies[i];
+                if (body == null || !body.IsTracked) continue;
+
+                var trackingId = body.TrackingId;
+                currentTrackedIds.Add(trackingId);
+
+                gestureDetectorList[i].ProcessGestures();
+                if (trackingId != gestureDetectorList[i].trackingId)
                 {
-                    bodyFrame.GetAndRefreshBodyData(bodies);
+                    gestureDetectorList[i].trackingId = trackingId;
 
-                    ulong highestTrackingId = 0;
-                    Body newControllingPerson = null;
-                    currentTrackedIds.Clear();
-
-                    foreach (var body in bodies)
-                    {
-                        if (body == null || !body.IsTracked) continue;
-
-                        var trackingId = body.TrackingId;
-                        currentTrackedIds.Add(trackingId);
-
-                        if (trackingId > highestTrackingId)
-                        {
-                            highestTrackingId = trackingId;
-                            newControllingPerson = body;
-                        }
-
-                        DrawBones(body);
-                        DrawJoints(body);
-                    }
-
-                    controllingPerson = newControllingPerson;
+                    gestureDetectorList[i].isPaused = trackingId == 0;
                 }
-                finally
+
+                if (trackingId > highestTrackingId)
                 {
-                    bodyFrame.Dispose();
+                    highestTrackingId = trackingId;
+                    newControllingPerson = body;
                 }
+
+                DrawBones(body, drawingContext);
+                DrawJoints(body, drawingContext);
             }
+            controllingPerson = newControllingPerson;
+
+            bodyFrame.Dispose();
+        }
+
+        private Point ConvertToScreenSpace(CameraSpacePoint point)
+        {
+            var centerX = mainWindow.Canvas.ActualWidth / 2;
+            var centerY = mainWindow.Canvas.ActualHeight / 2;
+            const float scale = 210.0f * App.WindowScaleFactor;
+
+            return new Point(point.X * scale + centerX, point.Y * -scale + centerY);
         }
 
         private Point SmoothJointPosition(ulong trackingId, JointType jointType, Point newPoint)
@@ -160,92 +150,57 @@ namespace KinectControl
             return smoothedPoint;
         }
 
-        private Point ConvertToScreenSpace(CameraSpacePoint point)
-        {
-            var centerX = mainWindow.Canvas.ActualWidth / 2;
-            var centerY = mainWindow.Canvas.ActualHeight / 2;
-
-            var scale = 200.0f * App.WindowScaleFactor;
-
-            return new Point(point.X * scale + centerX, point.Y * -scale + centerY);
-        }
-
-        private void DrawBones(Body body)
+        private void DrawBones(Body body, DrawingContext drawingContext)
         {
             if (body == null) return;
 
-            ulong trackingId = body.TrackingId;
-
-            IReadOnlyDictionary<JointType, Joint> joints = body.Joints;
+            var trackingId = body.TrackingId;
+            var joints = body.Joints;
 
             var brush = new SolidColorBrush(colorManager.AssignColor(trackingId));
+            brush.Freeze();
 
-            foreach (var bonePair in bonePairs)
+            foreach (var (firstJoint, secondJoint) in bonePairs)
             {
-                JointType firstJoint = bonePair.Item1;
-                JointType secondJoint = bonePair.Item2;
-
-                if (joints[firstJoint].TrackingState == TrackingState.NotTracked ||
-                    joints[secondJoint].TrackingState == TrackingState.NotTracked) continue;
-
                 var point1 = SmoothJointPosition(trackingId, firstJoint, ConvertToScreenSpace(joints[firstJoint].Position));
                 var point2 = SmoothJointPosition(trackingId, secondJoint, ConvertToScreenSpace(joints[secondJoint].Position));
 
-                var line = new Line
-                {
-                    X1 = point1.X,
-                    Y1 = point1.Y,
-                    X2 = point2.X,
-                    Y2 = point2.Y,
-                    Stroke = brush,
-                    StrokeThickness = 5 * App.WindowScaleFactor
-                };
-                mainWindow.Canvas.Children.Add(line);
+                drawingContext.DrawLine(new Pen(brush, 5 * App.WindowScaleFactor), point1, point2);
             }
         }
 
-        private void DrawJoints(Body body)
+        private void DrawJoints(Body body, DrawingContext drawingContext)
         {
             if (body == null) return;
 
-            ulong trackingId = body.TrackingId;
+            var trackingId = body.TrackingId;
             var joints = body.Joints;
 
-            SolidColorBrush brush = new SolidColorBrush(Color.FromArgb(App.Alpha, 0xFF, 0xFF, 0xFF));
+            var brush = new SolidColorBrush(Color.FromArgb(App.Alpha, 0xFF, 0xFF, 0xFF));
+            brush.Freeze();
 
             foreach (var joint in joints)
             {
                 if (joint.Value.TrackingState == TrackingState.NotTracked) continue;
 
-                Point point = SmoothJointPosition(trackingId, joint.Key, ConvertToScreenSpace(joint.Value.Position));
+                var point = SmoothJointPosition(trackingId, joint.Key, ConvertToScreenSpace(joint.Value.Position));
 
                 if (joint.Key == JointType.Head)
                 {
                     const double size = 13.0 * App.WindowScaleFactor;
-                    var head = new Rectangle
+                    var head = new Rect
                     {
-                        Width = size * 2,
-                        Height = size * 2,
-                        RadiusX = 7.0f,
-                        RadiusY = 7.0f,
-                        Fill = brush,
+                        Height = size*2,
+                        Width = size*2,
+                        X = point.X - size,
+                        Y = point.Y - size
                     };
-                    Canvas.SetLeft(head, point.X - size);
-                    Canvas.SetTop(head, point.Y - size);
-                    mainWindow.Canvas.Children.Add(head);
+                    drawingContext.DrawRoundedRectangle(brush, null, head, 5.0f * App.WindowScaleFactor, 5.0f * App.WindowScaleFactor);
                 }
                 else
                 {
-                    const double radius = 8 * App.WindowScaleFactor;
-                    var ellipse = new Ellipse
-                    {
-                        Width = radius,
-                        Height = radius,
-                        Fill = brush,
-                    };
-                    Canvas.SetLeft(ellipse, point.X - radius / 2);
-                    Canvas.SetTop(ellipse, point.Y - radius / 2);
-                    mainWindow.Canvas.Children.Add(ellipse);
+                    const double radius = 5 * App.WindowScaleFactor;
+                    drawingContext.DrawEllipse(brush, null, point, radius, radius);
                 }
             }
         }

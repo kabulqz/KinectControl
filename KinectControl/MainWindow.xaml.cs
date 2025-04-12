@@ -29,11 +29,12 @@ namespace KinectControl
         private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
         [System.Runtime.InteropServices.DllImport("kernel32.dll")]
         private static extern bool AllocConsole();
+        private Program program;
 
         public MainWindow()
         {
             InitializeComponent();
-            
+
 #if DEBUG
             AllocConsole();
             Console.WriteLine(@"Console opened! debugging active");
@@ -47,12 +48,16 @@ namespace KinectControl
             Console.WriteLine($@"Screen size: {SystemParameters.PrimaryScreenWidth}x{SystemParameters.PrimaryScreenHeight}");
             Console.WriteLine($@"Window size: {Width}x{Height}");
 
+            Canvas.Background = new SolidColorBrush(Color.FromRgb(0x17, 0x17, 0x17));
+
             MouseLeftButtonDown += (s, e) => DragMove();
             PreviewMouseUp += (s, e) =>
             {
                 if (e.ChangedButton == MouseButton.Middle) Close();
             };
 #else
+            //AllocConsole();
+
             Title += " - RELEASE";
             WindowStyle = WindowStyle.None;
             WindowState = WindowState.Maximized;
@@ -71,8 +76,7 @@ namespace KinectControl
                 SetWindowLong(hwnd, GWL_EXSTYLE, extendedStyle | WS_EX_TRANSPARENT | WS_EX_LAYERED);
             };
 #endif
-            
-            var program = new Program(this);
+            program = new Program(this);
         }
     }
 }
