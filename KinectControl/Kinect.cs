@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -51,7 +52,7 @@ namespace KinectControl
         private List<ulong> previousTrackedIds;
         public Body controllingPerson;
 
-        private List<GestureDetector> gestureDetectorList;
+        private List<GestureRecognizer> gestureRecognizers;
 
         public Kinect(MainWindow window)
         {
@@ -67,12 +68,11 @@ namespace KinectControl
             sensor.Open();
             bodyFrameReader = sensor.BodyFrameSource.OpenReader();
 
-            gestureDetectorList = new List<GestureDetector>();
-            for (int i = 0; i < sensor.BodyFrameSource.BodyCount; i++)
+            gestureRecognizers = new List<GestureRecognizer>();
+            for (var i = 0; i < sensor.BodyFrameSource.BodyCount; i++)
             {
-                GestureResultView result = new GestureResultView(i, false, false, 0.0f);
-                GestureDetector detector = new GestureDetector(sensor, result);
-                gestureDetectorList.Add(detector);
+                var recognizer = new GestureRecognizer(sensor);
+                gestureRecognizers.Add(recognizer);
             }
 
             Console.WriteLine(@"Kinect initialized successfully");
@@ -89,20 +89,19 @@ namespace KinectControl
             Body newControllingPerson = null;
             currentTrackedIds.Clear();
 
-            for(int i = 0; i < sensor.BodyFrameSource.BodyCount; i++)
+            for(var index = 0; index < sensor.BodyFrameSource.BodyCount; index++)
             {
-                var body = bodies[i];
+                var body = bodies[index];
                 if (body == null || !body.IsTracked) continue;
 
                 var trackingId = body.TrackingId;
                 currentTrackedIds.Add(trackingId);
 
-                gestureDetectorList[i].ProcessGestures();
-                if (trackingId != gestureDetectorList[i].trackingId)
+                gestureRecognizers[index].ProcessGestures();
+                if (trackingId != gestureRecognizers[index].trackingId)
                 {
-                    gestureDetectorList[i].trackingId = trackingId;
-
-                    gestureDetectorList[i].isPaused = trackingId == 0;
+                    gestureRecognizers[index].trackingId = trackingId;
+                    gestureRecognizers[index].isPaused = trackingId == 0;
                 }
 
                 if (trackingId > highestTrackingId)
@@ -111,8 +110,8 @@ namespace KinectControl
                     newControllingPerson = body;
                 }
 
-                DrawBones(body, drawingContext);
-                DrawJoints(body, drawingContext);
+                DrawBones(index, drawingContext);
+                DrawJoints(index, drawingContext);
             }
             controllingPerson = newControllingPerson;
 
@@ -123,7 +122,7 @@ namespace KinectControl
         {
             var centerX = mainWindow.Canvas.ActualWidth / 2;
             var centerY = mainWindow.Canvas.ActualHeight / 2;
-            const float scale = 210.0f * App.WindowScaleFactor;
+            const float scale = 215.0f * App.WindowScaleFactor;
 
             return new Point(point.X * scale + centerX, point.Y * -scale + centerY);
         }
@@ -150,9 +149,22 @@ namespace KinectControl
             return smoothedPoint;
         }
 
-        private void DrawBones(Body body, DrawingContext drawingContext)
+        private bool IsLowerLimb(JointType joint)
         {
-            if (body == null) return;
+            return joint == JointType.HipLeft || 
+                   joint == JointType.KneeLeft || 
+                   joint == JointType.AnkleLeft || 
+                   joint == JointType.FootLeft ||
+                   joint == JointType.HipRight || 
+                   joint == JointType.KneeRight || 
+                   joint == JointType.AnkleRight || 
+                   joint == JointType.FootRight;
+        }
+
+        private void DrawBones(int index, DrawingContext drawingContext)
+        {
+            var body = bodies[index];
+            if (body == null || !body.IsTracked) return;
 
             var trackingId = body.TrackingId;
             var joints = body.Joints;
@@ -162,6 +174,8 @@ namespace KinectControl
 
             foreach (var (firstJoint, secondJoint) in bonePairs)
             {
+                if (gestureRecognizers[index].isSeating && (IsLowerLimb(firstJoint) || IsLowerLimb(secondJoint))) continue;
+
                 var point1 = SmoothJointPosition(trackingId, firstJoint, ConvertToScreenSpace(joints[firstJoint].Position));
                 var point2 = SmoothJointPosition(trackingId, secondJoint, ConvertToScreenSpace(joints[secondJoint].Position));
 
@@ -169,9 +183,10 @@ namespace KinectControl
             }
         }
 
-        private void DrawJoints(Body body, DrawingContext drawingContext)
+        private void DrawJoints(int index, DrawingContext drawingContext)
         {
-            if (body == null) return;
+            var body = bodies[index];
+            if (body == null || !body.IsTracked) return;
 
             var trackingId = body.TrackingId;
             var joints = body.Joints;
@@ -182,6 +197,7 @@ namespace KinectControl
             foreach (var joint in joints)
             {
                 if (joint.Value.TrackingState == TrackingState.NotTracked) continue;
+                if (gestureRecognizers[index].isSeating && IsLowerLimb(joint.Key)) continue;
 
                 var point = SmoothJointPosition(trackingId, joint.Key, ConvertToScreenSpace(joint.Value.Position));
 

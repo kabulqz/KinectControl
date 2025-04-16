@@ -90,8 +90,7 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="ColorManager.cs" />
-    <Compile Include="GestureDetector.cs" />
-    <Compile Include="GestureResultView.cs" />
+    <Compile Include="GestureRecognizer.cs" />
     <Compile Include="Kinect.cs" />
     <Compile Include="MainWindow.xaml.cs">
       <DependentUpon>MainWindow.xaml</DependentUpon>
@@ -139,7 +138,6 @@
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
-    <PostBuildEvent>xcopy "$(ProjectDir)Src\*.*" "$(TargetDir)\vgbtechs" /S /R /Y /I
-xcopy "$(ProjectDir)Database\*.*" "$(TargetDir)\Database" /S /R /Y /I</PostBuildEvent>
+    <PostBuildEvent>xcopy "$(ProjectDir)Src\*.*" "$(TargetDir)\vgbtechs" /S /R /Y /I</PostBuildEvent>
   </PropertyGroup>
 </Project>
