@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -18,9 +19,12 @@ namespace KinectControl
         private readonly MainWindow mainWindow;
         public readonly ColorManager colorManager;
 
-        private Body[] bodies;
-        private KinectSensor sensor;
-        private BodyFrameReader bodyFrameReader;
+        private readonly List<Stopwatch> calibrationStopwatches;
+        private readonly List<GestureRecognizer> gestureRecognizers;
+
+        private readonly Body[] bodies;
+        private readonly KinectSensor sensor;
+        private readonly BodyFrameReader bodyFrameReader;
         private readonly List<Tuple<JointType, JointType>> bonePairs = new List<Tuple<JointType, JointType>>
         {
             new Tuple<JointType, JointType>(JointType.Head, JointType.Neck),
@@ -52,8 +56,6 @@ namespace KinectControl
         private List<ulong> previousTrackedIds;
         public Body controllingPerson;
 
-        private List<GestureRecognizer> gestureRecognizers;
-
         public Kinect(MainWindow window)
         {
             mainWindow = window;
@@ -68,9 +70,12 @@ namespace KinectControl
             sensor.Open();
             bodyFrameReader = sensor.BodyFrameSource.OpenReader();
 
+            calibrationStopwatches = new List<Stopwatch>();
             gestureRecognizers = new List<GestureRecognizer>();
             for (var i = 0; i < sensor.BodyFrameSource.BodyCount; i++)
             {
+                calibrationStopwatches.Add(new Stopwatch());
+
                 var recognizer = new GestureRecognizer(sensor);
                 gestureRecognizers.Add(recognizer);
             }
@@ -84,9 +89,6 @@ namespace KinectControl
             if (bodyFrame == null) return;
 
             bodyFrame.GetAndRefreshBodyData(bodies);
-
-            ulong highestTrackingId = 0;
-            Body newControllingPerson = null;
             currentTrackedIds.Clear();
 
             for(var index = 0; index < sensor.BodyFrameSource.BodyCount; index++)
@@ -104,61 +106,47 @@ namespace KinectControl
                     gestureRecognizers[index].isPaused = trackingId == 0;
                 }
 
-                if (trackingId > highestTrackingId)
-                {
-                    highestTrackingId = trackingId;
-                    newControllingPerson = body;
-                }
+                ProcessCalibration(index);
 
                 DrawBones(index, drawingContext);
                 DrawJoints(index, drawingContext);
             }
-            controllingPerson = newControllingPerson;
 
             bodyFrame.Dispose();
         }
 
-        private Point ConvertToScreenSpace(CameraSpacePoint point)
+        private void ProcessCalibration(int index)
         {
-            var centerX = mainWindow.Canvas.ActualWidth / 2;
-            var centerY = mainWindow.Canvas.ActualHeight / 2;
-            const float scale = 215.0f * App.WindowScaleFactor;
+            var body = bodies[index];
+            if (body == null || !body.IsTracked) return;
 
-            return new Point(point.X * scale + centerX, point.Y * -scale + centerY);
-        }
-
-        private Point SmoothJointPosition(ulong trackingId, JointType jointType, Point newPoint)
-        {
-            if (!smoothedJoints.ContainsKey(trackingId))
+            if (controllingPerson != null && !body.IsTracked)
             {
-                smoothedJoints[trackingId] = new Dictionary<JointType, Point>();
+                calibrationStopwatches[index].Stop();
+                calibrationStopwatches[index].Reset();
+                return;
             }
 
-            var joints = smoothedJoints[trackingId];
-
-            if (!joints.TryGetValue(jointType, out var smoothedPoint))
+            if (controllingPerson != null) return;
+            
+            if (gestureRecognizers[index].isSeating)
             {
-                joints[jointType] = newPoint;
-                return newPoint;
+                if (!calibrationStopwatches[index].IsRunning)
+                {
+                    calibrationStopwatches[index].Restart();
+                }
+                else if (calibrationStopwatches[index].Elapsed.TotalSeconds >= 3)
+                {
+                    calibrationStopwatches[index].Stop();
+                    controllingPerson = body;
+                    Console.WriteLine($@"New controlling person set");
+                }
             }
-
-            smoothedPoint.X += (newPoint.X - smoothedPoint.X) * 0.35f;
-            smoothedPoint.Y += (newPoint.Y - smoothedPoint.Y) * 0.35f;
-
-            joints[jointType] = smoothedPoint;
-            return smoothedPoint;
-        }
-
-        private bool IsLowerLimb(JointType joint)
-        {
-            return joint == JointType.HipLeft || 
-                   joint == JointType.KneeLeft || 
-                   joint == JointType.AnkleLeft || 
-                   joint == JointType.FootLeft ||
-                   joint == JointType.HipRight || 
-                   joint == JointType.KneeRight || 
-                   joint == JointType.AnkleRight || 
-                   joint == JointType.FootRight;
+            else
+            {
+                calibrationStopwatches[index].Stop();
+                calibrationStopwatches[index].Reset();
+            }
         }
 
         private void DrawBones(int index, DrawingContext drawingContext)
@@ -212,6 +200,30 @@ namespace KinectControl
                         Y = point.Y - size
                     };
                     drawingContext.DrawRoundedRectangle(brush, null, head, 5.0f * App.WindowScaleFactor, 5.0f * App.WindowScaleFactor);
+
+                    // progress bar
+                    if (controllingPerson == null && gestureRecognizers[index].isSeating)
+                    {
+                        var progress = calibrationStopwatches[index].Elapsed.TotalSeconds / 3;
+                        progress = Math.Max(0, Math.Min(1, progress));
+
+                        var barWidth = head.Width * 2.5;
+                        const float barHeight = 10 * App.WindowScaleFactor;
+
+                        var barX = head.X + (head.Width - barWidth) / 2;
+                        var barY = head.Y - barHeight - 10;
+
+                        var barBackground = new Rect(barX, barY, barWidth, barHeight);
+                        drawingContext.DrawRoundedRectangle(brush, null, barBackground, 5.0f, 5.0f);
+
+                        var bodyColor = colorManager.AssignColor(trackingId);
+                        var bodyColorBrush = new SolidColorBrush(Color.FromArgb(App.Alpha, bodyColor.R, bodyColor.G, bodyColor.B));
+                        bodyColorBrush.Freeze();
+
+                        var filledWidth = barWidth * progress;
+                        var barForeground = new Rect(barX, barY, filledWidth, barHeight);
+                        drawingContext.DrawRoundedRectangle(bodyColorBrush, null, barForeground, 5.0f, 5.0f);
+                    }
                 }
                 else
                 {
@@ -244,6 +256,49 @@ namespace KinectControl
         public bool IsAvailable()
         {
             return sensor != null && sensor.IsAvailable;
+        }
+
+        private Point ConvertToScreenSpace(CameraSpacePoint point)
+        {
+            var centerX = mainWindow.Canvas.ActualWidth / 2;
+            var centerY = mainWindow.Canvas.ActualHeight / 2;
+            const float scale = 215.0f * App.WindowScaleFactor;
+
+            return new Point(point.X * scale + centerX, point.Y * -scale + centerY);
+        }
+
+        private Point SmoothJointPosition(ulong trackingId, JointType jointType, Point newPoint)
+        {
+            if (!smoothedJoints.ContainsKey(trackingId))
+            {
+                smoothedJoints[trackingId] = new Dictionary<JointType, Point>();
+            }
+
+            var joints = smoothedJoints[trackingId];
+
+            if (!joints.TryGetValue(jointType, out var smoothedPoint))
+            {
+                joints[jointType] = newPoint;
+                return newPoint;
+            }
+
+            smoothedPoint.X += (newPoint.X - smoothedPoint.X) * 0.35f;
+            smoothedPoint.Y += (newPoint.Y - smoothedPoint.Y) * 0.35f;
+
+            joints[jointType] = smoothedPoint;
+            return smoothedPoint;
+        }
+
+        private bool IsLowerLimb(JointType joint)
+        {
+            return joint == JointType.HipLeft ||
+                   joint == JointType.KneeLeft ||
+                   joint == JointType.AnkleLeft ||
+                   joint == JointType.FootLeft ||
+                   joint == JointType.HipRight ||
+                   joint == JointType.KneeRight ||
+                   joint == JointType.AnkleRight ||
+                   joint == JointType.FootRight;
         }
     }
 }

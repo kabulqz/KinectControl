@@ -61,8 +61,8 @@ namespace KinectControl
                                 DiscreteGestureResult result;
                                 discreteResults.TryGetValue(gesture, out result);
 
-                                Console.WriteLine($@"result: [{result.Detected}] {result.Confidence}");
-                                if (result != null && result.Detected && result.Confidence >= 0.20f)
+                                //Console.WriteLine($@"result: [{result.Detected}] {result.Confidence}");
+                                if (result.Detected && result.Confidence >= 0.20f)
                                 {
                                     isSeating = true;
                                 }
