@@ -22,5 +22,8 @@ namespace KinectControl
 #else
             2.0f;
 #endif
+        public const float CalibrationTimeThreshold = 3.0f;
+        public const float EndControlTimeThreshold = 2.0f;
+        public const float WarningDistance = 1.5f;
     }
 }

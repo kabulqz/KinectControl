@@ -13,16 +13,18 @@ namespace KinectControl
     {
         private readonly VisualGestureBuilderFrameReader gestureFrameReader;
         private readonly VisualGestureBuilderFrameSource gestureFrameSource;
-        private readonly string gestureDatabase = @"../../Database/Seated.gbd";
+        private readonly string gestureDatabase = @"../../KinectControlGestures.gbd";
 
-        public bool isSeating { get; private set; }
+        public bool isCalibrating { get; private set; }
+        public bool isSeated { get; private set; }
 
         public GestureRecognizer(KinectSensor kinectSensor)
         {
             gestureFrameSource = new VisualGestureBuilderFrameSource(kinectSensor, 0);
             gestureFrameSource.TrackingIdLost += (s, e) =>
             {
-                isSeating = false;
+                isCalibrating = false;
+                isSeated = false;
                 Console.WriteLine(@"Lost tracking ID - resetting gesture values");
             };
 
@@ -56,17 +58,26 @@ namespace KinectControl
                     {
                         if (gesture.GestureType == GestureType.Discrete)
                         {
+                            if (gesture.Name.Equals(@"Calibration"))
+                            {
+                                discreteResults.TryGetValue(gesture, out var result);
+
+                                if (result.Detected && result.Confidence >= 0.80f)
+                                {
+                                    isCalibrating = true;
+                                }
+                                else isCalibrating = false;
+                            }
+
                             if (gesture.Name.Equals(@"Seated"))
                             {
-                                DiscreteGestureResult result;
-                                discreteResults.TryGetValue(gesture, out result);
+                                discreteResults.TryGetValue(gesture, out var result);
 
-                                //Console.WriteLine($@"result: [{result.Detected}] {result.Confidence}");
-                                if (result.Detected && result.Confidence >= 0.20f)
+                                if(result.Detected && result.Confidence >= 0.80f)
                                 {
-                                    isSeating = true;
+                                    isSeated = true;
                                 }
-                                else isSeating = false;
+                                else isSeated = false;
                             }
                         }
                     }

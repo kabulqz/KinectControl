@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -110,6 +111,7 @@ namespace KinectControl
 
                 DrawBones(index, drawingContext);
                 DrawJoints(index, drawingContext);
+                CheckControllingPersonDistance(index, drawingContext);
             }
 
             bodyFrame.Dispose();
@@ -129,23 +131,72 @@ namespace KinectControl
 
             if (controllingPerson != null) return;
             
-            if (gestureRecognizers[index].isSeating)
+            if (gestureRecognizers[index].isCalibrating)
             {
                 if (!calibrationStopwatches[index].IsRunning)
                 {
                     calibrationStopwatches[index].Restart();
                 }
-                else if (calibrationStopwatches[index].Elapsed.TotalSeconds >= 3)
+                else if (calibrationStopwatches[index].Elapsed.TotalSeconds >= App.CalibrationTimeThreshold)
                 {
                     calibrationStopwatches[index].Stop();
                     controllingPerson = body;
-                    Console.WriteLine($@"New controlling person set");
+                    Console.WriteLine(@"New controlling person set");
                 }
             }
             else
             {
                 calibrationStopwatches[index].Stop();
                 calibrationStopwatches[index].Reset();
+            }
+        }
+
+        private void CheckControllingPersonDistance(int index, DrawingContext drawingContext)
+        {
+            var body = bodies[index];
+            if (body == null || !body.IsTracked) return;
+
+            if (body != controllingPerson) return;
+
+            var joints = body.Joints;
+            if (joints.ContainsKey(JointType.SpineMid) &&
+                joints[JointType.SpineMid].TrackingState == TrackingState.Tracked)
+            {
+                var spineMid = joints[JointType.SpineMid].Position;
+                var distance = spineMid.Z;
+
+                if (distance < App.WarningDistance)
+                {
+                    const string message = "You're too close to the Kinect sensor";
+
+                    var formattedText = new FormattedText(
+                        message,
+                        CultureInfo.InvariantCulture,
+                        FlowDirection.LeftToRight,
+                        new Typeface(new FontFamily(@"Segoe UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal),
+                        40 * App.WindowScaleFactor,
+                        new SolidColorBrush(Color.FromArgb(App.Alpha, 0x0B, 0x0B, 0x0B)),
+                        VisualTreeHelper.GetDpi(Application.Current.MainWindow).PixelsPerDip
+                    );
+
+                    var centerX = mainWindow.Width / 2.0 - formattedText.Width / 2.0;
+                    var centerY = mainWindow.Height / 2.0 - formattedText.Height / 2.0;
+                    var textPosition = new Point(centerX, centerY);
+
+                    //outline
+                    const float thickness = 5 * App.WindowScaleFactor;
+                    for (var dx = -thickness; dx <= thickness; dx += thickness / 3.0f)
+                    {
+                        for (var dy = -thickness; dy <= thickness; dy += thickness / 3.0f)
+                        {
+                            if(dx * dx + dy * dy > thickness * thickness) continue;
+                            if (dx == 0 && dy == 0) continue;
+                            drawingContext.DrawText(formattedText, new Point(textPosition.X + dx, textPosition.Y + dy));
+                        }
+                    }
+                    formattedText.SetForegroundBrush(new SolidColorBrush(Color.FromArgb(App.Alpha, 0xFF, 0xFF, 0xFF)));
+                    drawingContext.DrawText(formattedText, textPosition);
+                }
             }
         }
 
@@ -162,7 +213,7 @@ namespace KinectControl
 
             foreach (var (firstJoint, secondJoint) in bonePairs)
             {
-                if (gestureRecognizers[index].isSeating && (IsLowerLimb(firstJoint) || IsLowerLimb(secondJoint))) continue;
+                if (gestureRecognizers[index].isSeated && (IsLowerLimbJoint(firstJoint) || IsLowerLimbJoint(secondJoint))) continue;
 
                 var point1 = SmoothJointPosition(trackingId, firstJoint, ConvertToScreenSpace(joints[firstJoint].Position));
                 var point2 = SmoothJointPosition(trackingId, secondJoint, ConvertToScreenSpace(joints[secondJoint].Position));
@@ -185,7 +236,8 @@ namespace KinectControl
             foreach (var joint in joints)
             {
                 if (joint.Value.TrackingState == TrackingState.NotTracked) continue;
-                if (gestureRecognizers[index].isSeating && IsLowerLimb(joint.Key)) continue;
+
+                if (gestureRecognizers[index].isSeated && IsLowerLimbJoint(joint.Key)) continue;
 
                 var point = SmoothJointPosition(trackingId, joint.Key, ConvertToScreenSpace(joint.Value.Position));
 
@@ -194,17 +246,17 @@ namespace KinectControl
                     const double size = 13.0 * App.WindowScaleFactor;
                     var head = new Rect
                     {
-                        Height = size*2,
-                        Width = size*2,
+                        Height = size * 2,
+                        Width = size * 2,
                         X = point.X - size,
                         Y = point.Y - size
                     };
                     drawingContext.DrawRoundedRectangle(brush, null, head, 5.0f * App.WindowScaleFactor, 5.0f * App.WindowScaleFactor);
 
                     // progress bar
-                    if (controllingPerson == null && gestureRecognizers[index].isSeating)
+                    if (controllingPerson == null && gestureRecognizers[index].isCalibrating)
                     {
-                        var progress = calibrationStopwatches[index].Elapsed.TotalSeconds / 3;
+                        var progress = calibrationStopwatches[index].Elapsed.TotalSeconds / App.CalibrationTimeThreshold;
                         progress = Math.Max(0, Math.Min(1, progress));
 
                         var barWidth = head.Width * 2.5;
@@ -231,6 +283,18 @@ namespace KinectControl
                     drawingContext.DrawEllipse(brush, null, point, radius, radius);
                 }
             }
+        }
+
+        private bool IsLowerLimbJoint(JointType joint)
+        {
+            return joint == JointType.HipLeft ||
+                   joint == JointType.KneeLeft ||
+                   joint == JointType.AnkleLeft ||
+                   joint == JointType.FootLeft ||
+                   joint == JointType.HipRight ||
+                   joint == JointType.KneeRight ||
+                   joint == JointType.AnkleRight ||
+                   joint == JointType.FootRight;
         }
 
         public void RemoveUntrackedBodies()
@@ -287,18 +351,6 @@ namespace KinectControl
 
             joints[jointType] = smoothedPoint;
             return smoothedPoint;
-        }
-
-        private bool IsLowerLimb(JointType joint)
-        {
-            return joint == JointType.HipLeft ||
-                   joint == JointType.KneeLeft ||
-                   joint == JointType.AnkleLeft ||
-                   joint == JointType.FootLeft ||
-                   joint == JointType.HipRight ||
-                   joint == JointType.KneeRight ||
-                   joint == JointType.AnkleRight ||
-                   joint == JointType.FootRight;
         }
     }
 }
