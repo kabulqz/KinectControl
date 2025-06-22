@@ -13,7 +13,7 @@ namespace KinectControl
     {
         private readonly VisualGestureBuilderFrameReader gestureFrameReader;
         private readonly VisualGestureBuilderFrameSource gestureFrameSource;
-        private readonly string gestureDatabase = @"../../KinectControlGestures.gbd";
+        private readonly string gestureDatabase = @"../../Src/KinectControlGestures.gbd";
 
         public bool isCalibrating { get; private set; }
         public bool isSeated { get; private set; }
@@ -58,26 +58,28 @@ namespace KinectControl
                     {
                         if (gesture.GestureType == GestureType.Discrete)
                         {
-                            if (gesture.Name.Equals(@"Calibration"))
+                            switch (gesture.Name)
                             {
-                                discreteResults.TryGetValue(gesture, out var result);
-
-                                if (result.Detected && result.Confidence >= 0.80f)
+                                case @"Calibration":
                                 {
-                                    isCalibrating = true;
+                                    discreteResults.TryGetValue(gesture, out var result);
+                                    if (result != null && result.Detected && result.Confidence >= 0.80f)
+                                    {
+                                        isCalibrating = true;
+                                    }
+                                    else isCalibrating = false;
+                                    break;
                                 }
-                                else isCalibrating = false;
-                            }
-
-                            if (gesture.Name.Equals(@"Seated"))
-                            {
-                                discreteResults.TryGetValue(gesture, out var result);
-
-                                if(result.Detected && result.Confidence >= 0.80f)
+                                case @"Seated":
                                 {
-                                    isSeated = true;
+                                    discreteResults.TryGetValue(gesture, out var result);
+                                    if(result != null && result.Detected && result.Confidence >= 0.80f)
+                                    {
+                                        isSeated = true;
+                                    }
+                                    else isSeated = false;
+                                    break;
                                 }
-                                else isSeated = false;
                             }
                         }
                     }

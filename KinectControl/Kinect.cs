@@ -55,6 +55,12 @@ namespace KinectControl
         private readonly Dictionary<ulong, Dictionary<JointType, Point>> smoothedJoints;
         private readonly List<ulong> currentTrackedIds;
         private List<ulong> previousTrackedIds;
+        private readonly List<double> leftArmLengths;
+        private readonly List<double> rightArmLengths;
+        private double aspectRatio;
+        private double miniWidth;
+        private double miniHeight;
+
         public Body controllingPerson;
 
         public Kinect(MainWindow window)
@@ -80,6 +86,9 @@ namespace KinectControl
                 var recognizer = new GestureRecognizer(sensor);
                 gestureRecognizers.Add(recognizer);
             }
+
+            leftArmLengths = new List<double>();
+            rightArmLengths = new List<double>();
 
             Console.WriteLine(@"Kinect initialized successfully");
         }
@@ -111,6 +120,7 @@ namespace KinectControl
 
                 DrawBones(index, drawingContext);
                 DrawJoints(index, drawingContext);
+                DrawScreenSpace(index, drawingContext);
                 CheckControllingPersonDistance(index, drawingContext);
             }
 
@@ -137,9 +147,40 @@ namespace KinectControl
                 {
                     calibrationStopwatches[index].Restart();
                 }
-                else if (calibrationStopwatches[index].Elapsed.TotalSeconds >= App.CalibrationTimeThreshold)
+
+                if (calibrationStopwatches[index].Elapsed.TotalSeconds < App.CalibrationTimeThreshold)
+                {
+                    var joints = body.Joints;
+
+                    var leftForearm = GetDistance(joints[JointType.WristLeft].Position, joints[JointType.ElbowLeft].Position);
+                    var leftUpperArm = GetDistance(joints[JointType.ElbowLeft].Position, joints[JointType.ShoulderLeft].Position);
+                    var leftArmLength = leftForearm + leftUpperArm;
+                    leftArmLengths.Add(leftArmLength);
+
+                    var rightForearm = GetDistance(joints[JointType.WristRight].Position, joints[JointType.ElbowRight].Position);
+                    var rightUpperArm = GetDistance(joints[JointType.ElbowRight].Position, joints[JointType.ShoulderRight].Position);
+                    var rightArmLength = rightForearm + rightUpperArm;
+                    rightArmLengths.Add(rightArmLength);
+                }
+                else
                 {
                     calibrationStopwatches[index].Stop();
+                    const float scale = 280.0f * App.WindowScaleFactor;
+
+                    var avgLeft = leftArmLengths.Average();
+                    var avgRight = rightArmLengths.Average();
+                    leftArmLengths.Clear();
+                    rightArmLengths.Clear();
+
+                    var tempArmLength = avgLeft + avgRight;
+                    Console.WriteLine($@"Arm Diagonal on screen (px): {tempArmLength * scale}");
+
+                    var screenWidth = SystemParameters.PrimaryScreenWidth;
+                    var screenHeight = SystemParameters.PrimaryScreenHeight;
+                    aspectRatio = screenWidth / screenHeight;
+                    miniHeight = (tempArmLength * scale) / Math.Sqrt(aspectRatio * aspectRatio + 1);
+                    miniWidth = miniHeight * aspectRatio;
+
                     controllingPerson = body;
                     Console.WriteLine(@"New controlling person set");
                 }
@@ -148,55 +189,8 @@ namespace KinectControl
             {
                 calibrationStopwatches[index].Stop();
                 calibrationStopwatches[index].Reset();
-            }
-        }
-
-        private void CheckControllingPersonDistance(int index, DrawingContext drawingContext)
-        {
-            var body = bodies[index];
-            if (body == null || !body.IsTracked) return;
-
-            if (body != controllingPerson) return;
-
-            var joints = body.Joints;
-            if (joints.ContainsKey(JointType.SpineMid) &&
-                joints[JointType.SpineMid].TrackingState == TrackingState.Tracked)
-            {
-                var spineMid = joints[JointType.SpineMid].Position;
-                var distance = spineMid.Z;
-
-                if (distance < App.WarningDistance)
-                {
-                    const string message = "You're too close to the Kinect sensor";
-
-                    var formattedText = new FormattedText(
-                        message,
-                        CultureInfo.InvariantCulture,
-                        FlowDirection.LeftToRight,
-                        new Typeface(new FontFamily(@"Segoe UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal),
-                        40 * App.WindowScaleFactor,
-                        new SolidColorBrush(Color.FromArgb(App.Alpha, 0x0B, 0x0B, 0x0B)),
-                        VisualTreeHelper.GetDpi(Application.Current.MainWindow).PixelsPerDip
-                    );
-
-                    var centerX = mainWindow.Width / 2.0 - formattedText.Width / 2.0;
-                    var centerY = mainWindow.Height / 2.0 - formattedText.Height / 2.0;
-                    var textPosition = new Point(centerX, centerY);
-
-                    //outline
-                    const float thickness = 5 * App.WindowScaleFactor;
-                    for (var dx = -thickness; dx <= thickness; dx += thickness / 3.0f)
-                    {
-                        for (var dy = -thickness; dy <= thickness; dy += thickness / 3.0f)
-                        {
-                            if(dx * dx + dy * dy > thickness * thickness) continue;
-                            if (dx == 0 && dy == 0) continue;
-                            drawingContext.DrawText(formattedText, new Point(textPosition.X + dx, textPosition.Y + dy));
-                        }
-                    }
-                    formattedText.SetForegroundBrush(new SolidColorBrush(Color.FromArgb(App.Alpha, 0xFF, 0xFF, 0xFF)));
-                    drawingContext.DrawText(formattedText, textPosition);
-                }
+                leftArmLengths.Clear();
+                rightArmLengths.Clear();
             }
         }
 
@@ -285,16 +279,70 @@ namespace KinectControl
             }
         }
 
-        private bool IsLowerLimbJoint(JointType joint)
+        private void DrawScreenSpace(int index, DrawingContext drawingContext)
         {
-            return joint == JointType.HipLeft ||
-                   joint == JointType.KneeLeft ||
-                   joint == JointType.AnkleLeft ||
-                   joint == JointType.FootLeft ||
-                   joint == JointType.HipRight ||
-                   joint == JointType.KneeRight ||
-                   joint == JointType.AnkleRight ||
-                   joint == JointType.FootRight;
+            var body = bodies[index];
+            if (controllingPerson == null || body != controllingPerson) return;
+            var joints = body.Joints;
+            if (!joints.TryGetValue(JointType.ShoulderRight, out var joint)) return;
+            var centerBody = ConvertToScreenSpace(joint.Position);
+
+            var topLeft = new Point(centerBody.X - miniWidth / 2, centerBody.Y - miniHeight / 2);
+            var bottomRight = new Point(centerBody.X + miniWidth / 2, centerBody.Y + miniHeight / 2);
+
+            var miniScreen = new Rect(topLeft, bottomRight);
+            var brush = new SolidColorBrush(Color.FromArgb(App.Alpha, 0x88, 0x88, 0x88));
+            var pen = new Pen(brush, 5 * App.WindowScaleFactor);
+            drawingContext.DrawRectangle(null, pen, miniScreen);
+        }
+
+        private void CheckControllingPersonDistance(int index, DrawingContext drawingContext)
+        {
+            var body = bodies[index];
+            if (body == null || !body.IsTracked) return;
+
+            if (body != controllingPerson) return;
+
+            var joints = body.Joints;
+            if (joints.ContainsKey(JointType.SpineMid) &&
+                joints[JointType.SpineMid].TrackingState == TrackingState.Tracked)
+            {
+                var spineMid = joints[JointType.SpineMid].Position;
+                var distance = spineMid.Z;
+
+                if (distance < App.WarningDistance)
+                {
+                    const string message = "You're too close to the Kinect sensor";
+
+                    var formattedText = new FormattedText(
+                        message,
+                        CultureInfo.InvariantCulture,
+                        FlowDirection.LeftToRight,
+                        new Typeface(new FontFamily(@"Segoe UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal),
+                        40 * App.WindowScaleFactor,
+                        new SolidColorBrush(Color.FromArgb(App.Alpha, 0x0B, 0x0B, 0x0B)),
+                        VisualTreeHelper.GetDpi(Application.Current.MainWindow).PixelsPerDip
+                    );
+
+                    var centerX = mainWindow.Width / 2.0 - formattedText.Width / 2.0;
+                    var centerY = mainWindow.Height / 2.0 - formattedText.Height / 2.0;
+                    var textPosition = new Point(centerX, centerY);
+
+                    //outline
+                    const float thickness = 5 * App.WindowScaleFactor;
+                    for (var dx = -thickness; dx <= thickness; dx += thickness / 3.0f)
+                    {
+                        for (var dy = -thickness; dy <= thickness; dy += thickness / 3.0f)
+                        {
+                            if(dx * dx + dy * dy > thickness * thickness) continue;
+                            if (dx == 0 && dy == 0) continue;
+                            drawingContext.DrawText(formattedText, new Point(textPosition.X + dx, textPosition.Y + dy));
+                        }
+                    }
+                    formattedText.SetForegroundBrush(new SolidColorBrush(Color.FromArgb(App.Alpha, 0xFF, 0xFF, 0xFF)));
+                    drawingContext.DrawText(formattedText, textPosition);
+                }
+            }
         }
 
         public void RemoveUntrackedBodies()
@@ -320,6 +368,26 @@ namespace KinectControl
         public bool IsAvailable()
         {
             return sensor != null && sensor.IsAvailable;
+        }
+
+        private double GetDistance(CameraSpacePoint a, CameraSpacePoint b)
+        {
+            double dx = a.X - b.X;
+            double dy = a.Y - b.Y;
+            double dz = a.Z - b.Z;
+            return Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        }
+
+        private bool IsLowerLimbJoint(JointType joint)
+        {
+            return joint == JointType.HipLeft ||
+                   joint == JointType.KneeLeft ||
+                   joint == JointType.AnkleLeft ||
+                   joint == JointType.FootLeft ||
+                   joint == JointType.HipRight ||
+                   joint == JointType.KneeRight ||
+                   joint == JointType.AnkleRight ||
+                   joint == JointType.FootRight;
         }
 
         private Point ConvertToScreenSpace(CameraSpacePoint point)

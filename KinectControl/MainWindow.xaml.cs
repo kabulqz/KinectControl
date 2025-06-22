@@ -23,12 +23,24 @@ namespace KinectControl
         private const int GWL_EXSTYLE = -20;
         private const int WS_EX_TRANSPARENT = 0x00000020;
         private const int WS_EX_LAYERED = 0x00080000;
+        [DllImport("kernel32.dll")]
+        private static extern bool AllocConsole();
         [DllImport("user32.dll")]
         private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
         [DllImport("user32.dll")]
         private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
-        private static extern bool AllocConsole();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SystemParametersInfo(int uAction, uint uParam, IntPtr lpvParam, int fuWinIni);
+        [DllImport("user32.dll")]
+        private static extern bool SetSystemCursor(IntPtr hCursor, uint id);
+        [DllImport("user32.dll")]
+        private static extern IntPtr LoadCursor(IntPtr hInstance, int lpCursorName);
+        [DllImport("user32.dll")]
+        private static extern bool DestroyCursor(IntPtr hCursor);
+        private const uint OCR_NORMAL = 32512; // Standard arrow cursor
+        private const uint OCR_HAND = 32649; // Hand cursor
+        private const int SPI_SETCURSORS = 0x0057;
         private Program program;
 
         public MainWindow()
@@ -36,9 +48,7 @@ namespace KinectControl
             InitializeComponent();
 
 #if DEBUG
-            AllocConsole();
-            Console.WriteLine(@"Console opened! debugging active");
-
+            AllocConsole(); Console.WriteLine(@"Console opened! debugging active");
             Title += " - DEBUG";
             WindowStyle = WindowStyle.None;
             ResizeMode = ResizeMode.NoResize;
@@ -49,15 +59,15 @@ namespace KinectControl
             Console.WriteLine($@"Window size: {Width}x{Height}");
 
             Canvas.Background = new SolidColorBrush(Color.FromRgb(0x17, 0x17, 0x17));
-
+            
             MouseLeftButtonDown += (s, e) => DragMove();
+            
             PreviewMouseUp += (s, e) =>
             {
                 if (e.ChangedButton == MouseButton.Middle) Close();
             };
 #else
             //AllocConsole();
-
             Title += " - RELEASE";
             WindowStyle = WindowStyle.None;
             WindowState = WindowState.Maximized;
@@ -74,9 +84,29 @@ namespace KinectControl
                 var hwnd = new WindowInteropHelper(this).Handle;
                 var extendedStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
                 SetWindowLong(hwnd, GWL_EXSTYLE, extendedStyle | WS_EX_TRANSPARENT | WS_EX_LAYERED);
+                SetSystemCursorToHand();
+            };
+
+            Closed += (s, e) =>
+            {
+                RestoreDefaultCursors();
             };
 #endif
             program = new Program(this);
+        }
+
+        private static void SetSystemCursorToHand()
+        {
+            var hHand = LoadCursor(IntPtr.Zero, (int)OCR_HAND);
+            if (hHand != IntPtr.Zero)
+            {
+                SetSystemCursor(hHand, OCR_NORMAL); // Set the system cursor to hand
+            }
+        }
+
+        private static void RestoreDefaultCursors()
+        {
+            SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
         }
     }
 }
