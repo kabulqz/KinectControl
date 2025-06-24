@@ -5,13 +5,13 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
 
 using Microsoft.Kinect;
-using Microsoft.Kinect.VisualGestureBuilder;
 
 namespace KinectControl
 {
@@ -21,7 +21,14 @@ namespace KinectControl
         public readonly ColorManager colorManager;
 
         private readonly List<Stopwatch> calibrationStopwatches;
+        private readonly List<Stopwatch> endControlStopwatches;
         private readonly List<GestureRecognizer> gestureRecognizers;
+
+        private readonly List<double> leftArmLengths;
+        private readonly List<double> rightArmLengths;
+
+        private double[] calibrationProgress;
+        private double[] endControlProgress;
 
         private readonly Body[] bodies;
         private readonly KinectSensor sensor;
@@ -55,8 +62,7 @@ namespace KinectControl
         private readonly Dictionary<ulong, Dictionary<JointType, Point>> smoothedJoints;
         private readonly List<ulong> currentTrackedIds;
         private List<ulong> previousTrackedIds;
-        private readonly List<double> leftArmLengths;
-        private readonly List<double> rightArmLengths;
+        
         private double aspectRatio;
         private double miniWidth;
         private double miniHeight;
@@ -73,15 +79,19 @@ namespace KinectControl
             smoothedJoints = new Dictionary<ulong, Dictionary<JointType, Point>>();
             currentTrackedIds = new List<ulong>();
             previousTrackedIds = new List<ulong>();
+            calibrationProgress = new double[bodies.Length];
+            endControlProgress = new double[bodies.Length];
 
             sensor.Open();
             bodyFrameReader = sensor.BodyFrameSource.OpenReader();
 
             calibrationStopwatches = new List<Stopwatch>();
+            endControlStopwatches = new List<Stopwatch>();
             gestureRecognizers = new List<GestureRecognizer>();
             for (var i = 0; i < sensor.BodyFrameSource.BodyCount; i++)
             {
                 calibrationStopwatches.Add(new Stopwatch());
+                endControlStopwatches.Add(new Stopwatch());
 
                 var recognizer = new GestureRecognizer(sensor);
                 gestureRecognizers.Add(recognizer);
@@ -91,6 +101,12 @@ namespace KinectControl
             rightArmLengths = new List<double>();
 
             Console.WriteLine(@"Kinect initialized successfully");
+
+            SystemController.QuickKeyCombo(new []
+            {
+                App.Flags.Keyboard.Key.LEFT_WINDOWS,
+                App.Flags.Keyboard.Key.E
+            });
         }
 
         public void ProcessBodyData(DrawingContext drawingContext)
@@ -117,6 +133,8 @@ namespace KinectControl
                 }
 
                 ProcessCalibration(index);
+                ProcessEndControl(index); // this method will be responsible for ending control when the user makes a specific gesture
+                //ProcessControl(index); // this methd will be responsiible for implementation of controling the PC with gestures such as mouse, virtual keboard, etc.
 
                 DrawBones(index, drawingContext);
                 DrawJoints(index, drawingContext);
@@ -184,6 +202,8 @@ namespace KinectControl
                     controllingPerson = body;
                     Console.WriteLine(@"New controlling person set");
                 }
+
+                calibrationProgress[index] = Math.Max(0, Math.Min(1, calibrationStopwatches[index].Elapsed.TotalSeconds / App.CalibrationTimeThreshold));
             }
             else
             {
@@ -191,6 +211,48 @@ namespace KinectControl
                 calibrationStopwatches[index].Reset();
                 leftArmLengths.Clear();
                 rightArmLengths.Clear();
+                calibrationProgress[index] = 0;
+            }
+        }
+
+        private void ProcessEndControl(int index)
+        {
+            var body = bodies[index];
+            if (body == null || !body.IsTracked) return;
+
+            if (controllingPerson == null || controllingPerson.TrackingId != body.TrackingId)
+            {
+                endControlStopwatches[index].Stop();
+                endControlStopwatches[index].Reset();
+                endControlProgress[index] = 0;
+                return;
+            }
+
+            if (gestureRecognizers[index].isEndingControl)
+            {
+                if (!endControlStopwatches[index].IsRunning)
+                {
+                    endControlStopwatches[index].Restart();
+                }
+
+                if (endControlStopwatches[index].Elapsed.TotalSeconds >= App.EndControlTimeThreshold)
+                {
+                    // End control and reset the controlling person
+                    endControlStopwatches[index].Stop();
+                    endControlProgress[index] = 0;
+                    controllingPerson = null;
+                    Console.WriteLine(@"Control ended, resetting controlling person");
+                }
+                else
+                {
+                    endControlProgress[index] = Math.Max(0, Math.Min(1, endControlStopwatches[index].Elapsed.TotalSeconds / App.EndControlTimeThreshold));
+                }
+            }
+            else
+            {
+                endControlStopwatches[index].Stop();
+                endControlStopwatches[index].Reset();
+                endControlProgress[index] = 0;
             }
         }
 
@@ -247,12 +309,9 @@ namespace KinectControl
                     };
                     drawingContext.DrawRoundedRectangle(brush, null, head, 5.0f * App.WindowScaleFactor, 5.0f * App.WindowScaleFactor);
 
-                    // progress bar
-                    if (controllingPerson == null && gestureRecognizers[index].isCalibrating)
+                    // progress bars
+                    if (controllingPerson == null && calibrationProgress[index] > 0)
                     {
-                        var progress = calibrationStopwatches[index].Elapsed.TotalSeconds / App.CalibrationTimeThreshold;
-                        progress = Math.Max(0, Math.Min(1, progress));
-
                         var barWidth = head.Width * 2.5;
                         const float barHeight = 10 * App.WindowScaleFactor;
 
@@ -266,7 +325,26 @@ namespace KinectControl
                         var bodyColorBrush = new SolidColorBrush(Color.FromArgb(App.Alpha, bodyColor.R, bodyColor.G, bodyColor.B));
                         bodyColorBrush.Freeze();
 
-                        var filledWidth = barWidth * progress;
+                        var filledWidth = barWidth * calibrationProgress[index];
+                        var barForeground = new Rect(barX, barY, filledWidth, barHeight);
+                        drawingContext.DrawRoundedRectangle(bodyColorBrush, null, barForeground, 5.0f, 5.0f);
+                    }
+                    else if (controllingPerson == body && endControlProgress[index] > 0)
+                    {
+                        var barWidth = head.Width * 2.5;
+                        const float barHeight = 10 * App.WindowScaleFactor;
+
+                        var barX = head.X + (head.Width - barWidth) / 2;
+                        var barY = head.Y - barHeight - 10;
+
+                        var barBackground = new Rect(barX, barY, barWidth, barHeight);
+                        drawingContext.DrawRoundedRectangle(brush, null, barBackground, 5.0f, 5.0f);
+
+                        var bodyColor = colorManager.AssignColor(trackingId);
+                        var bodyColorBrush = new SolidColorBrush(Color.FromArgb(App.Alpha, bodyColor.R, bodyColor.G, bodyColor.B));
+                        bodyColorBrush.Freeze();
+
+                        var filledWidth = barWidth * endControlProgress[index];
                         var barForeground = new Rect(barX, barY, filledWidth, barHeight);
                         drawingContext.DrawRoundedRectangle(bodyColorBrush, null, barForeground, 5.0f, 5.0f);
                     }
@@ -294,6 +372,7 @@ namespace KinectControl
             var brush = new SolidColorBrush(Color.FromArgb(App.Alpha, 0x88, 0x88, 0x88));
             var pen = new Pen(brush, 5 * App.WindowScaleFactor);
             drawingContext.DrawRectangle(null, pen, miniScreen);
+            //MoveMouseAccordingToScreenSpace(index, miniScreen); // Function to move the mouse cursor according to the position of the controlling persons hand in the mini screen space
         }
 
         private void CheckControllingPersonDistance(int index, DrawingContext drawingContext)

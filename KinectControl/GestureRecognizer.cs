@@ -16,6 +16,7 @@ namespace KinectControl
         private readonly string gestureDatabase = @"../../Src/KinectControlGestures.gbd";
 
         public bool isCalibrating { get; private set; }
+        public bool isEndingControl { get; private set; }
         public bool isSeated { get; private set; }
 
         public GestureRecognizer(KinectSensor kinectSensor)
@@ -24,6 +25,7 @@ namespace KinectControl
             gestureFrameSource.TrackingIdLost += (s, e) =>
             {
                 isCalibrating = false;
+                isEndingControl = false;
                 isSeated = false;
                 Console.WriteLine(@"Lost tracking ID - resetting gesture values");
             };
@@ -36,12 +38,13 @@ namespace KinectControl
 
             using (var database = new VisualGestureBuilderDatabase(gestureDatabase))
             {
-                Console.WriteLine(@"Found gestures:");
+                Console.Write(@"Found gestures:");
                 foreach (var gesture in database.AvailableGestures)
                 {
-                    Console.WriteLine($@"    [{(gesture.GestureType == GestureType.Discrete ? "D" : "C")}] {gesture.Name}");
+                    Console.Write($@"    [{(gesture.GestureType == GestureType.Discrete ? "D" : "C")}] {gesture.Name}");
                     gestureFrameSource.AddGesture(gesture);
                 }
+                Console.WriteLine();
             }
         }
 
@@ -68,6 +71,16 @@ namespace KinectControl
                                         isCalibrating = true;
                                     }
                                     else isCalibrating = false;
+                                    break;
+                                }
+                                case @"EndControl":
+                                {
+                                    discreteResults.TryGetValue(gesture, out var result);
+                                    if (result != null && result.Detected && result.Confidence >= 0.80f)
+                                    {
+                                        isEndingControl = true;
+                                    }
+                                    else isEndingControl = false;
                                     break;
                                 }
                                 case @"Seated":

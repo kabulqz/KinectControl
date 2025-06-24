@@ -11,7 +11,7 @@ namespace KinectControl
 {
     internal class Program
     {
-        private const int FPS = 58; // has to be this value to avoid flickering
+        private const int FPS = 55; // has to be this value to avoid flickering
         private readonly DrawingGroup drawingGroup;
 
         private readonly DispatcherTimer timer;
