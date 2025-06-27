@@ -15,6 +15,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
+using System.Windows.Forms;
 
 namespace KinectControl
 {
@@ -46,7 +47,6 @@ namespace KinectControl
         public MainWindow()
         {
             InitializeComponent();
-
 #if DEBUG
             AllocConsole(); Console.WriteLine(@"Console opened! debugging active");
             Title += " - DEBUG";
@@ -55,7 +55,15 @@ namespace KinectControl
             
             Width = SystemParameters.PrimaryScreenWidth / 2;
             Height = SystemParameters.PrimaryScreenHeight / 2;
-            Console.WriteLine($@"Screen size: {SystemParameters.PrimaryScreenWidth}x{SystemParameters.PrimaryScreenHeight}");
+
+            var primary = Screen.PrimaryScreen.Bounds;
+            Left = primary.Left + (primary.Width - Width) / 2;
+            Top = primary.Top + (primary.Height - Height) / 2;
+
+            foreach (var screen in Screen.AllScreens)
+            {
+                Console.WriteLine($@"Screen: {screen.DeviceName}, Primary: {screen.Primary}, Bounds: {screen.Bounds}");
+            }
             Console.WriteLine($@"Window size: {Width}x{Height}");
 
             Canvas.Background = new SolidColorBrush(Color.FromRgb(0x17, 0x17, 0x17));
@@ -76,8 +84,11 @@ namespace KinectControl
             AllowsTransparency = true;
             Topmost = true;
 
-            Width = SystemParameters.PrimaryScreenWidth;
-            Height = SystemParameters.PrimaryScreenHeight;
+            var primary = Screen.PrimaryScreen.Bounds;
+            Width = primary.Width;
+            Height = primary.Height;
+            Left = primary.Left;
+            Top = primary.Top;
 
             Loaded += (s, e) =>
             {

@@ -32,7 +32,7 @@ namespace KinectControl
                 availableColors.Add(new Tuple<int, Color>(i, colors[i]));
             }
 
-            Console.WriteLine("Color manager initialized");
+            Console.WriteLine(@"Color manager initialized");
         }
 
         public Color AssignColor(ulong trackedId)

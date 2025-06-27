@@ -47,19 +47,22 @@ namespace KinectControl
             {
                 kinect.ProcessBodyData(dc);
 
-                var controllingBrush = new SolidColorBrush(Color.FromArgb(App.Alpha, 0xFF, 0xFF, 0xFF));
-                if (kinect.controllingPerson != null)
+                if (kinect.TrackedBodyCount >= 2)
                 {
-                    controllingBrush = new SolidColorBrush(kinect.colorManager.AssignColor(kinect.controllingPerson.TrackingId));
+                    var controllingBrush = new SolidColorBrush(Color.FromArgb(App.Alpha, 0xFF, 0xFF, 0xFF));
+                    if (kinect.controllingPerson != null)
+                    {
+                        controllingBrush = new SolidColorBrush(kinect.colorManager.AssignColor(kinect.controllingPerson.TrackingId));
+                    }
+                    var controllingRect = new Rect
+                    {
+                        Width = 120,
+                        Height = 12,
+                        X = mainWindow.Width / 2 - 60,
+                        Y = 10
+                    };
+                    dc.DrawRoundedRectangle(controllingBrush, null, controllingRect, 5.0f, 5.0f);
                 }
-                var controllingRect = new Rect
-                {
-                    Width = 120,
-                    Height = 12,
-                    X = mainWindow.Width / 2 - 60,
-                    Y = 10
-                };
-                dc.DrawRoundedRectangle(controllingBrush, null, controllingRect, 5.0f, 5.0f);
 
                 var statusBrush = new SolidColorBrush(kinect.IsAvailable()
                     ? Color.FromArgb(App.Alpha, 0x60, 0xD3, 0x94)

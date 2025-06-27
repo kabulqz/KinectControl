@@ -7,11 +7,14 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Windows;
+using System.Windows.Forms;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
 
 using Microsoft.Kinect;
+using Application = System.Windows.Application;
+using FlowDirection = System.Windows.FlowDirection;
 
 namespace KinectControl
 {
@@ -24,8 +27,8 @@ namespace KinectControl
         private readonly List<Stopwatch> endControlStopwatches;
         private readonly List<GestureRecognizer> gestureRecognizers;
 
-        private readonly List<double> leftArmLengths;
-        private readonly List<double> rightArmLengths;
+        private readonly List<double>[] leftArmLengths;
+        private readonly List<double>[] rightArmLengths;
 
         private double[] calibrationProgress;
         private double[] endControlProgress;
@@ -62,11 +65,14 @@ namespace KinectControl
         private readonly Dictionary<ulong, Dictionary<JointType, Point>> smoothedJoints;
         private readonly List<ulong> currentTrackedIds;
         private List<ulong> previousTrackedIds;
-        
+
+        private Screen[] allScreens;
         private double aspectRatio;
         private double miniWidth;
         private double miniHeight;
 
+        private Point? smoothedCenterBody = null;
+        private Screen controllingScreen;
         public Body controllingPerson;
 
         public Kinect(MainWindow window)
@@ -82,31 +88,37 @@ namespace KinectControl
             calibrationProgress = new double[bodies.Length];
             endControlProgress = new double[bodies.Length];
 
+            leftArmLengths = new List<double>[bodies.Length];
+            rightArmLengths = new List<double>[bodies.Length];
+
             sensor.Open();
             bodyFrameReader = sensor.BodyFrameSource.OpenReader();
 
             calibrationStopwatches = new List<Stopwatch>();
             endControlStopwatches = new List<Stopwatch>();
             gestureRecognizers = new List<GestureRecognizer>();
-            for (var i = 0; i < sensor.BodyFrameSource.BodyCount; i++)
+            for (var i = 0; i < bodies.Length; i++)
             {
                 calibrationStopwatches.Add(new Stopwatch());
                 endControlStopwatches.Add(new Stopwatch());
+
+                leftArmLengths[i] = new List<double>();
+                rightArmLengths[i] = new List<double>();
 
                 var recognizer = new GestureRecognizer(sensor);
                 gestureRecognizers.Add(recognizer);
             }
 
-            leftArmLengths = new List<double>();
-            rightArmLengths = new List<double>();
-
             Console.WriteLine(@"Kinect initialized successfully");
-
+            /*
+            // TEST QUICK KEY COMBO
+            System
             SystemController.QuickKeyCombo(new []
             {
                 App.Flags.Keyboard.Key.LEFT_WINDOWS,
                 App.Flags.Keyboard.Key.E
             });
+            */
         }
 
         public void ProcessBodyData(DrawingContext drawingContext)
@@ -148,7 +160,6 @@ namespace KinectControl
         private void ProcessCalibration(int index)
         {
             var body = bodies[index];
-            if (body == null || !body.IsTracked) return;
 
             if (controllingPerson != null && !body.IsTracked)
             {
@@ -173,22 +184,22 @@ namespace KinectControl
                     var leftForearm = GetDistance(joints[JointType.WristLeft].Position, joints[JointType.ElbowLeft].Position);
                     var leftUpperArm = GetDistance(joints[JointType.ElbowLeft].Position, joints[JointType.ShoulderLeft].Position);
                     var leftArmLength = leftForearm + leftUpperArm;
-                    leftArmLengths.Add(leftArmLength);
+                    leftArmLengths[index].Add(leftArmLength);
 
                     var rightForearm = GetDistance(joints[JointType.WristRight].Position, joints[JointType.ElbowRight].Position);
                     var rightUpperArm = GetDistance(joints[JointType.ElbowRight].Position, joints[JointType.ShoulderRight].Position);
                     var rightArmLength = rightForearm + rightUpperArm;
-                    rightArmLengths.Add(rightArmLength);
+                    rightArmLengths[index].Add(rightArmLength);
                 }
                 else
                 {
                     calibrationStopwatches[index].Stop();
-                    const float scale = 280.0f * App.WindowScaleFactor;
+                    const float scale = 200.0f * App.WindowScaleFactor;
 
-                    var avgLeft = leftArmLengths.Average();
-                    var avgRight = rightArmLengths.Average();
-                    leftArmLengths.Clear();
-                    rightArmLengths.Clear();
+                    var avgLeft = leftArmLengths[index].Average();
+                    var avgRight = rightArmLengths[index].Average();
+                    leftArmLengths[index].Clear();
+                    rightArmLengths[index].Clear();
 
                     var tempArmLength = avgLeft + avgRight;
                     Console.WriteLine($@"Arm Diagonal on screen (px): {tempArmLength * scale}");
@@ -199,7 +210,9 @@ namespace KinectControl
                     miniHeight = (tempArmLength * scale) / Math.Sqrt(aspectRatio * aspectRatio + 1);
                     miniWidth = miniHeight * aspectRatio;
 
+                    controllingScreen = Screen.PrimaryScreen;
                     controllingPerson = body;
+                    smoothedCenterBody = null;
                     Console.WriteLine(@"New controlling person set");
                 }
 
@@ -209,8 +222,8 @@ namespace KinectControl
             {
                 calibrationStopwatches[index].Stop();
                 calibrationStopwatches[index].Reset();
-                leftArmLengths.Clear();
-                rightArmLengths.Clear();
+                leftArmLengths[index].Clear();
+                rightArmLengths[index].Clear();
                 calibrationProgress[index] = 0;
             }
         }
@@ -218,7 +231,6 @@ namespace KinectControl
         private void ProcessEndControl(int index)
         {
             var body = bodies[index];
-            if (body == null || !body.IsTracked) return;
 
             if (controllingPerson == null || controllingPerson.TrackingId != body.TrackingId)
             {
@@ -259,7 +271,6 @@ namespace KinectControl
         private void DrawBones(int index, DrawingContext drawingContext)
         {
             var body = bodies[index];
-            if (body == null || !body.IsTracked) return;
 
             var trackingId = body.TrackingId;
             var joints = body.Joints;
@@ -281,7 +292,6 @@ namespace KinectControl
         private void DrawJoints(int index, DrawingContext drawingContext)
         {
             var body = bodies[index];
-            if (body == null || !body.IsTracked) return;
 
             var trackingId = body.TrackingId;
             var joints = body.Joints;
@@ -361,24 +371,91 @@ namespace KinectControl
         {
             var body = bodies[index];
             if (controllingPerson == null || body != controllingPerson) return;
+
             var joints = body.Joints;
             if (!joints.TryGetValue(JointType.ShoulderRight, out var joint)) return;
-            var centerBody = ConvertToScreenSpace(joint.Position);
 
-            var topLeft = new Point(centerBody.X - miniWidth / 2, centerBody.Y - miniHeight / 2);
-            var bottomRight = new Point(centerBody.X + miniWidth / 2, centerBody.Y + miniHeight / 2);
+            var centerBodyRaw = ConvertToScreenSpace(joint.Position);
+            var centerBody = SmoothJointPosition(body.TrackingId, JointType.ShoulderRight, centerBodyRaw);
+            if (smoothedCenterBody == null)
+            {
+                smoothedCenterBody = centerBody;
+            }
+            else
+            {
+                smoothedCenterBody = new Point(
+                    smoothedCenterBody.Value.X + (centerBody.X - smoothedCenterBody.Value.X) * 0.1,
+                    smoothedCenterBody.Value.Y + (centerBody.Y - smoothedCenterBody.Value.Y) * 0.1
+                    );
+            }
 
-            var miniScreen = new Rect(topLeft, bottomRight);
-            var brush = new SolidColorBrush(Color.FromArgb(App.Alpha, 0x88, 0x88, 0x88));
-            var pen = new Pen(brush, 5 * App.WindowScaleFactor);
-            drawingContext.DrawRectangle(null, pen, miniScreen);
-            //MoveMouseAccordingToScreenSpace(index, miniScreen); // Function to move the mouse cursor according to the position of the controlling persons hand in the mini screen space
+            if (allScreens == null || allScreens.Length == 0) allScreens = Screen.AllScreens;
+            var reference = controllingScreen ?? Screen.PrimaryScreen;
+
+            var scaleX = miniWidth / reference.Bounds.Width;
+            var scaleY = miniHeight / reference.Bounds.Height;
+            var scale = Math.Min(scaleX, scaleY);
+
+            var miniTopLeft = new Point(smoothedCenterBody.Value.X - miniWidth / 2, smoothedCenterBody.Value.Y - miniHeight / 2);
+
+            Rect? controllingMonitorMiniRect = null;
+            foreach (var screen in allScreens)
+            {
+                var bounds = screen.Bounds;
+
+                var relativeX = bounds.X - reference.Bounds.X;
+                var relativeY = bounds.Y - reference.Bounds.Y;
+
+                var width = bounds.Width * scale;
+                var height = bounds.Height * scale;
+                var left = miniTopLeft.X + (relativeX * scale);
+                var top = miniTopLeft.Y + (relativeY * scale);
+
+                var screenRect = new Rect(left, top, width, height);
+
+                if (screen == reference) controllingMonitorMiniRect = screenRect;
+
+                var brushColor = screen == reference
+                    ? Color.FromArgb(App.Alpha, 0x88, 0x88, 0x88)
+                    : Color.FromArgb(App.Alpha, 0x66, 0x66, 0x66);
+                var brush = new SolidColorBrush(brushColor);
+                var pen = new Pen(brush, 4 * App.WindowScaleFactor);
+
+                drawingContext.DrawRectangle(null, pen, screenRect);
+            }
+
+            if (controllingMonitorMiniRect.HasValue)
+            {
+                MoveMouseAccordingToScreenSpace(index, controllingMonitorMiniRect.Value);
+            }
+        }
+
+        private void MoveMouseAccordingToScreenSpace(int index, Rect miniScreen)
+        {
+            var body = bodies[index];
+            if (controllingPerson == null || body != controllingPerson) return;
+
+            var joints = body.Joints;
+            if (!joints.TryGetValue(JointType.HandRight, out var handJoint)) return;
+
+            var handPointRaw = ConvertToScreenSpace(handJoint.Position);
+            var handPoint = SmoothJointPosition(body.TrackingId, JointType.HandRight, handPointRaw);
+
+            var reference = controllingScreen ?? Screen.PrimaryScreen;
+            var referenceBounds = reference.Bounds;
+
+            var relativeX = (handPoint.X - miniScreen.X) / miniScreen.Width;
+            var relativeY = (handPoint.Y - miniScreen.Y) / miniScreen.Height;
+
+            var screenX = (int)Math.Round(referenceBounds.X + relativeX * referenceBounds.Width);
+            var screenY = (int)Math.Round(referenceBounds.Y + relativeY * referenceBounds.Height);
+
+            SystemController.MoveTo(screenX, screenY);
         }
 
         private void CheckControllingPersonDistance(int index, DrawingContext drawingContext)
         {
             var body = bodies[index];
-            if (body == null || !body.IsTracked) return;
 
             if (body != controllingPerson) return;
 
@@ -448,6 +525,8 @@ namespace KinectControl
         {
             return sensor != null && sensor.IsAvailable;
         }
+
+        public int TrackedBodyCount => currentTrackedIds.Count;
 
         private double GetDistance(CameraSpacePoint a, CameraSpacePoint b)
         {
