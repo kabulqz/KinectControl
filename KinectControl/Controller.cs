@@ -94,6 +94,18 @@ namespace KinectControl
         }
         public static void LeftDown() => SendSingleInput(CreateMouseInput(App.Flags.Mouse.LEFTDOWN));
         public static void LeftUp() => SendSingleInput(CreateMouseInput(App.Flags.Mouse.LEFTUP));
+        public static void LeftClick()
+        {
+            LeftDown();
+            Thread.Sleep(50); // Short delay to simulate a click
+            LeftUp();
+        }
+        public static void DoubleLeftClick()
+        { 
+            LeftClick();
+            Thread.Sleep(50); // Short delay between clicks
+            LeftClick();
+        }
         public static void MiddleDown() => SendSingleInput(CreateMouseInput(App.Flags.Mouse.MIDDLEDOWN));
         public static void MiddleUp() => SendSingleInput(CreateMouseInput(App.Flags.Mouse.MIDDLEUP));
         public static void RightDown() => SendSingleInput(CreateMouseInput(App.Flags.Mouse.RIGHTDOWN));

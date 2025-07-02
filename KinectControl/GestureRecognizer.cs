@@ -18,6 +18,7 @@ namespace KinectControl
         public bool isCalibrating { get; private set; }
         public bool isEndingControl { get; private set; }
         public bool isSeated { get; private set; }
+        public bool isStoppingCursor { get; private set; }
 
         public GestureRecognizer(KinectSensor kinectSensor)
         {
@@ -52,47 +53,53 @@ namespace KinectControl
         {
             using (var frame = gestureFrameReader.CalculateAndAcquireLatestFrame())
             {
-                if (frame == null) return;
-
-                var discreteResults = frame.DiscreteGestureResults;
-                if (discreteResults != null)
+                var discreteResults = frame?.DiscreteGestureResults;
+                if (discreteResults == null) return;
+                foreach (var gesture in gestureFrameSource.Gestures)
                 {
-                    foreach (var gesture in gestureFrameSource.Gestures)
+                    if (gesture.GestureType == GestureType.Discrete)
                     {
-                        if (gesture.GestureType == GestureType.Discrete)
+                        switch (gesture.Name)
                         {
-                            switch (gesture.Name)
+                            case @"Calibration":
                             {
-                                case @"Calibration":
+                                discreteResults.TryGetValue(gesture, out var result);
+                                if (result != null && result.Detected && result.Confidence >= 0.80f)
                                 {
-                                    discreteResults.TryGetValue(gesture, out var result);
-                                    if (result != null && result.Detected && result.Confidence >= 0.80f)
-                                    {
-                                        isCalibrating = true;
-                                    }
-                                    else isCalibrating = false;
-                                    break;
+                                    isCalibrating = true;
                                 }
-                                case @"EndControl":
+                                else isCalibrating = false;
+                                break;
+                            }
+                            case @"EndControl":
+                            {
+                                discreteResults.TryGetValue(gesture, out var result);
+                                if (result != null && result.Detected && result.Confidence >= 0.80f)
                                 {
-                                    discreteResults.TryGetValue(gesture, out var result);
-                                    if (result != null && result.Detected && result.Confidence >= 0.80f)
-                                    {
-                                        isEndingControl = true;
-                                    }
-                                    else isEndingControl = false;
-                                    break;
+                                    isEndingControl = true;
                                 }
-                                case @"Seated":
+                                else isEndingControl = false;
+                                break;
+                            }
+                            case @"Seated":
+                            {
+                                discreteResults.TryGetValue(gesture, out var result);
+                                if (result != null && result.Detected && result.Confidence >= 0.80f)
                                 {
-                                    discreteResults.TryGetValue(gesture, out var result);
-                                    if(result != null && result.Detected && result.Confidence >= 0.80f)
-                                    {
-                                        isSeated = true;
-                                    }
-                                    else isSeated = false;
-                                    break;
+                                    isSeated = true;
                                 }
+                                else isSeated = false;
+                                break;
+                            }
+                            case @"StopCursor":
+                            {
+                                discreteResults.TryGetValue(gesture, out var result);
+                                if (result != null && result.Detected && result.Confidence >= 0.025f)
+                                {
+                                    isStoppingCursor = true;
+                                }
+                                else isStoppingCursor = false;
+                                break;
                             }
                         }
                     }

@@ -11,7 +11,7 @@ using System.Windows.Forms;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
-
+using System.Xaml;
 using Microsoft.Kinect;
 using Application = System.Windows.Application;
 using FlowDirection = System.Windows.FlowDirection;
@@ -430,6 +430,12 @@ namespace KinectControl
             }
         }
 
+        // Replace the MoveMouseAccordingToScreenSpace method with the following implementation
+        private bool isDragging = false;
+        private bool isLeftDown = false;
+        private DateTime lastClickTime = DateTime.MinValue;
+        private const int DoubleClickThresholdMs = 400;
+        private System.Drawing.Point lastMousePos;
         private void MoveMouseAccordingToScreenSpace(int index, Rect miniScreen)
         {
             var body = bodies[index];
@@ -450,7 +456,60 @@ namespace KinectControl
             var screenX = (int)Math.Round(referenceBounds.X + relativeX * referenceBounds.Width);
             var screenY = (int)Math.Round(referenceBounds.Y + relativeY * referenceBounds.Height);
 
-            SystemController.MoveTo(screenX, screenY);
+            var handState = body.HandRightState;
+
+            if (handState == HandState.Closed)
+            {
+                if (!isLeftDown)
+                {
+                    var now = DateTime.Now;
+                    var diff = (now - lastClickTime).TotalMilliseconds;
+
+                    if (diff < DoubleClickThresholdMs)
+                        SystemController.DoubleLeftClick();
+                    else
+                        SystemController.LeftDown();
+
+                    lastClickTime = now;
+                    isLeftDown = true;
+                    isDragging = false;
+                    lastMousePos = new System.Drawing.Point(screenX, screenY);
+                }
+                else
+                {
+                    int dx = screenX - lastMousePos.X;
+                    int dy = screenY - lastMousePos.Y;
+
+                    if (!isDragging && (Math.Abs(dx) > 2 || Math.Abs(dy) > 2))
+                        isDragging = true;
+                }
+            }
+            else if (handState == HandState.Open)
+            {
+                if (isLeftDown)
+                {
+                    SystemController.LeftUp();
+                    isLeftDown = false;
+                    isDragging = false;
+                }
+            }
+
+            if (!gestureRecognizers[index].isStoppingCursor)
+            {
+                if (!isDragging)
+                {
+                    SystemController.MoveTo(screenX, screenY);
+                    lastMousePos = new System.Drawing.Point(screenX, screenY);
+                }
+                else
+                {
+                    var dx = screenX - lastMousePos.X;
+                    var dy = screenY - lastMousePos.Y;
+                    SystemController.MoveBy(dx, dy);
+                    lastMousePos.X += dx;
+                    lastMousePos.Y += dy;
+                }
+            }
         }
 
         private void CheckControllingPersonDistance(int index, DrawingContext drawingContext)
