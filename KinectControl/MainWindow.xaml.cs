@@ -146,6 +146,12 @@ namespace KinectControl
                 var extendedStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
                 SetWindowLong(hwnd, GWL_EXSTYLE, extendedStyle | WS_EX_TRANSPARENT | WS_EX_LAYERED);
             };
+            SystemController.QuickKeyCombo(new[]
+            {
+                App.Flags.Keyboard.Key.LEFT_WINDOWS,
+                App.Flags.Keyboard.Key.LEFT_CONTROL,
+                App.Flags.Keyboard.Key.O,
+            });
 #endif
             // Set up the mouse hook
             _proc = HookCallback;

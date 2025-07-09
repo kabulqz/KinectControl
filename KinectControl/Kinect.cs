@@ -71,6 +71,10 @@ namespace KinectControl
         private double miniWidth;
         private double miniHeight;
 
+        private readonly bool[] prevSwitchLeft;
+        private readonly bool[] prevSwitchRight;
+        private int currentScreenIndex = 0;
+
         private Point? smoothedCenterBody = null;
         private Screen controllingScreen;
         public Body controllingPerson;
@@ -87,6 +91,8 @@ namespace KinectControl
             previousTrackedIds = new List<ulong>();
             calibrationProgress = new double[bodies.Length];
             endControlProgress = new double[bodies.Length];
+            prevSwitchLeft = new bool[bodies.Length];
+            prevSwitchRight = new bool[bodies.Length];
 
             leftArmLengths = new List<double>[bodies.Length];
             rightArmLengths = new List<double>[bodies.Length];
@@ -112,7 +118,6 @@ namespace KinectControl
             Console.WriteLine(@"Kinect initialized successfully");
             /*
             // TEST QUICK KEY COMBO
-            System
             SystemController.QuickKeyCombo(new []
             {
                 App.Flags.Keyboard.Key.LEFT_WINDOWS,
@@ -372,26 +377,41 @@ namespace KinectControl
             var body = bodies[index];
             if (controllingPerson == null || body != controllingPerson) return;
 
+            if (allScreens == null || allScreens.Length == 0)
+                allScreens = Screen.AllScreens;
+
+            if (currentScreenIndex < 0 || currentScreenIndex >= allScreens.Length)
+                currentScreenIndex = 0;
+
+            var recognizer = gestureRecognizers[index];
+            if (!prevSwitchLeft[index] && recognizer.isSwitchingLeft)
+            {
+                var newIndex = (currentScreenIndex - 1 + allScreens.Length) % allScreens.Length;
+                SwitchToScreen(newIndex);
+            }
+            if (!prevSwitchRight[index] && recognizer.isSwitchingRight)
+            {
+                var newIndex = (currentScreenIndex + 1) % allScreens.Length;
+                SwitchToScreen(newIndex);
+            }
+            prevSwitchLeft[index] = recognizer.isSwitchingLeft;
+            prevSwitchRight[index] = recognizer.isSwitchingRight;
+
             var joints = body.Joints;
             if (!joints.TryGetValue(JointType.ShoulderRight, out var joint)) return;
 
             var centerBodyRaw = ConvertToScreenSpace(joint.Position);
             var centerBody = SmoothJointPosition(body.TrackingId, JointType.ShoulderRight, centerBodyRaw);
-            if (smoothedCenterBody == null)
-            {
-                smoothedCenterBody = centerBody;
-            }
+            if (smoothedCenterBody == null) smoothedCenterBody = centerBody;
             else
             {
                 smoothedCenterBody = new Point(
                     smoothedCenterBody.Value.X + (centerBody.X - smoothedCenterBody.Value.X) * 0.1,
                     smoothedCenterBody.Value.Y + (centerBody.Y - smoothedCenterBody.Value.Y) * 0.1
-                    );
+                );
             }
 
-            if (allScreens == null || allScreens.Length == 0) allScreens = Screen.AllScreens;
             var reference = controllingScreen ?? Screen.PrimaryScreen;
-
             var scaleX = miniWidth / reference.Bounds.Width;
             var scaleY = miniHeight / reference.Bounds.Height;
             var scale = Math.Min(scaleX, scaleY);
@@ -413,11 +433,13 @@ namespace KinectControl
 
                 var screenRect = new Rect(left, top, width, height);
 
-                if (screen == reference) controllingMonitorMiniRect = screenRect;
+                if (Equals(screen, reference))
+                    controllingMonitorMiniRect = screenRect;
 
-                var brushColor = screen == reference
+                var brushColor = Equals(screen, reference)
                     ? Color.FromArgb(App.Alpha, 0x88, 0x88, 0x88)
                     : Color.FromArgb(App.Alpha, 0x66, 0x66, 0x66);
+
                 var brush = new SolidColorBrush(brushColor);
                 var pen = new Pen(brush, 4 * App.WindowScaleFactor);
 
@@ -429,10 +451,27 @@ namespace KinectControl
                 MoveMouseAccordingToScreenSpace(index, controllingMonitorMiniRect.Value);
             }
         }
+        private void SwitchToScreen(int index)
+        {
+            currentScreenIndex = index;
+            controllingScreen = allScreens[currentScreenIndex];
+            Console.WriteLine($"Switched to screen {currentScreenIndex}: {controllingScreen.DeviceName}");
+#if !DEBUG
+            var bounds = controllingScreen.Bounds;
+            mainWindow.WindowState = WindowState.Normal; // turn off temporarily to move the application window
+            mainWindow.Left = bounds.Left;
+            mainWindow.Top = bounds.Top;
+            mainWindow.Width = bounds.Width;
+            mainWindow.Height = bounds.Height;
+            mainWindow.WindowState = WindowState.Maximized; // go back to the old setting
+            Console.WriteLine($"App moved to bounds: {bounds.Left}, {bounds.Top}, {bounds.Width}x{bounds.Height}");
+#endif
+        }
 
-        // Replace the MoveMouseAccordingToScreenSpace method with the following implementation
-        private bool isDragging = false;
-        private bool isLeftDown = false;
+        private bool isDragging;
+        private bool isLeftDown;
+        private bool isRightDown;
+        private bool isMiddleDown;
         private DateTime lastClickTime = DateTime.MinValue;
         private const int DoubleClickThresholdMs = 400;
         private System.Drawing.Point lastMousePos;
@@ -456,43 +495,16 @@ namespace KinectControl
             var screenX = (int)Math.Round(referenceBounds.X + relativeX * referenceBounds.Width);
             var screenY = (int)Math.Round(referenceBounds.Y + relativeY * referenceBounds.Height);
 
-            var handState = body.HandRightState;
-
-            if (handState == HandState.Closed)
+            var isLeftHandInMiniScreen = false;
+            if (joints.TryGetValue(JointType.HandLeft, out var leftHandJoint))
             {
-                if (!isLeftDown)
-                {
-                    var now = DateTime.Now;
-                    var diff = (now - lastClickTime).TotalMilliseconds;
-
-                    if (diff < DoubleClickThresholdMs)
-                        SystemController.DoubleLeftClick();
-                    else
-                        SystemController.LeftDown();
-
-                    lastClickTime = now;
-                    isLeftDown = true;
-                    isDragging = false;
-                    lastMousePos = new System.Drawing.Point(screenX, screenY);
-                }
-                else
-                {
-                    int dx = screenX - lastMousePos.X;
-                    int dy = screenY - lastMousePos.Y;
-
-                    if (!isDragging && (Math.Abs(dx) > 2 || Math.Abs(dy) > 2))
-                        isDragging = true;
-                }
+                var leftHandPoint = ConvertToScreenSpace(leftHandJoint.Position);
+                isLeftHandInMiniScreen = miniScreen.Contains(leftHandPoint);
             }
-            else if (handState == HandState.Open)
-            {
-                if (isLeftDown)
-                {
-                    SystemController.LeftUp();
-                    isLeftDown = false;
-                    isDragging = false;
-                }
-            }
+
+            HandleLeftClick(body, screenX, screenY);
+            HandleRightClick(body, isLeftHandInMiniScreen);
+            HandleMiddleClick(body, isLeftHandInMiniScreen);
 
             if (!gestureRecognizers[index].isStoppingCursor)
             {
@@ -508,6 +520,98 @@ namespace KinectControl
                     SystemController.MoveBy(dx, dy);
                     lastMousePos.X += dx;
                     lastMousePos.Y += dy;
+                }
+            }
+        }
+        private void HandleLeftClick(Body body, int screenX, int screenY)
+        {
+            var handState = body.HandRightState;
+
+            if (handState == HandState.Closed)
+            {
+                if (!isLeftDown)
+                {
+                    var now = DateTime.Now;
+                    var diff = (now - lastClickTime).TotalMilliseconds;
+
+                    if (diff < DoubleClickThresholdMs)
+                        SystemController.DoubleLeftClick();
+                    else
+                    {
+                        SystemController.LeftDown();
+                    }
+
+                    lastClickTime = now;
+                        
+                    isLeftDown = true;
+                    isDragging = false;
+                    lastMousePos = new System.Drawing.Point(screenX, screenY);
+                }
+                else
+                {
+                    var dx = screenX - lastMousePos.X;
+                    var dy = screenY - lastMousePos.Y;
+
+                    if (!isDragging && (Math.Abs(dx) > 2 || Math.Abs(dy) > 2))
+                        isDragging = true;
+                }
+            }
+            else if (handState == HandState.Open)
+            {
+                if (isLeftDown)
+                {
+                    SystemController.LeftUp();
+                    isLeftDown = false;
+                    isDragging = false;
+                }
+            }
+        }
+        private void HandleRightClick(Body body, bool isLeftHandInMiniScreen)
+        {
+            if (!isLeftHandInMiniScreen) return;
+
+            var handState = body.HandLeftState;
+
+            if (handState == HandState.Closed)
+            {
+                if (!isRightDown)
+                {
+                    SystemController.RightDown();
+                    isRightDown = true;
+                }
+            }
+            else if (handState == HandState.Open)
+            {
+                if (isRightDown)
+                {
+                    SystemController.RightUp();
+                    isRightDown = false;
+                }
+            }
+        }
+        private void HandleMiddleClick(Body body, bool isLeftHandInMiniScreen)
+        {
+            if (!isLeftHandInMiniScreen) return;
+
+            var rightState = body.HandRightState;
+            var leftState = body.HandLeftState;
+
+            var bothClosed = rightState == HandState.Closed && leftState == HandState.Closed;
+
+            if (bothClosed)
+            {
+                if (!isMiddleDown)
+                {
+                    SystemController.MiddleDown();
+                    isMiddleDown = true;
+                }
+            }
+            else
+            {
+                if (isMiddleDown)
+                {
+                    SystemController.MiddleUp();
+                    isMiddleDown = false;
                 }
             }
         }

@@ -19,6 +19,8 @@ namespace KinectControl
         public bool isEndingControl { get; private set; }
         public bool isSeated { get; private set; }
         public bool isStoppingCursor { get; private set; }
+        public bool isSwitchingLeft { get; private set; }
+        public bool isSwitchingRight { get; private set; }
 
         public GestureRecognizer(KinectSensor kinectSensor)
         {
@@ -99,6 +101,26 @@ namespace KinectControl
                                     isStoppingCursor = true;
                                 }
                                 else isStoppingCursor = false;
+                                break;
+                            }
+                            case @"SwitchMonitor_Left":
+                            {
+                                discreteResults.TryGetValue(gesture, out var result);
+                                if (result != null && result.Detected && result.Confidence >= 1.0f)
+                                {
+                                    isSwitchingLeft = true;
+                                }
+                                else isSwitchingLeft = false;
+                                break;
+                            }
+                            case @"SwitchMonitor_Right":
+                            {
+                                discreteResults.TryGetValue(gesture, out var result);
+                                if (result != null && result.Detected && result.Confidence >= 1.0f)
+                                {
+                                    isSwitchingRight = true;
+                                }
+                                else isSwitchingRight = false;
                                 break;
                             }
                         }

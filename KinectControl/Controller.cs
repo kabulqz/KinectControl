@@ -1,13 +1,15 @@
 ﻿using System;
-using System.Linq;
-using System.Windows;
-using System.Threading;
-using System.Management;
-using System.Diagnostics;
-using System.Windows.Media;
-using System.Globalization;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.Globalization;
+using System.Linq;
+using System.Management;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using System.Windows;
+using System.Windows.Media;
 
 namespace KinectControl
 {
@@ -78,7 +80,6 @@ namespace KinectControl
         private static extern uint SendInput(uint nInputs, Input[] pInputs, int cbSize);
         [DllImport("user32.dll")]
         private static extern bool SetCursorPos(int X, int Y);
-
         private static void SendSingleInput(Input input)
         {
             SendInput(1, new[] { input }, Marshal.SizeOf(typeof(Input)));
@@ -115,5 +116,6 @@ namespace KinectControl
         {
             SetCursorPos(x, y);
         }
+
     }
 }
