@@ -77,12 +77,45 @@ namespace KinectControl
             return CallNextHookEx(_hookID, nCode, wParam, lParam);
         }
 
+        private async void MinimizeOSK()
+        {
+            await Task.Delay(500);
+
+            IntPtr oskWindow = FindWindow("OSKMainClass", null);
+
+            if (oskWindow == IntPtr.Zero)
+            {
+                oskWindow = FindWindow("OSKMainClass", "Klawiatura ekranowa");
+            }
+
+            if (oskWindow == IntPtr.Zero)
+            {
+                oskWindow = FindWindow("OSKMainClass", "On-Screen Keyboard");
+            }
+
+            if (oskWindow != IntPtr.Zero && IsWindowVisible(oskWindow))
+            {
+                ShowWindow(oskWindow, SW_MINIMIZE);
+                PostMessage(oskWindow, WM_SYSCOMMAND, SC_MINIMIZE, IntPtr.Zero);
+                Console.WriteLine("OSK minimized successfully");
+            }
+            else
+            {
+                Console.WriteLine("OSK window not found or not visible");
+            }
+        }
+
         private const int GWL_EXSTYLE = -20;
         private const int WS_EX_TRANSPARENT = 0x00000020;
         private const int WS_EX_LAYERED = 0x00080000;
         private const int WH_MOUSE_LL = 14;
         private const int WM_LBUTTONDOWN = 0x0201;
         private const int WM_LBUTTONUP = 0x0202;
+
+        private const int SW_MINIMIZE = 6;
+        private const int SW_SHOWMINIMIZED = 2;
+        private const uint WM_SYSCOMMAND = 0x0112;
+        private static readonly IntPtr SC_MINIMIZE = (IntPtr)0xF020;
 
         private IntPtr _hookID = IntPtr.Zero;
         private LowLevelMouseProc _proc;
@@ -91,8 +124,6 @@ namespace KinectControl
 
         private const string HandCur = @"../../Src/hand.cur";
         private const string DragCur = @"../../Src/drag.cur";
-        private Program program;
-
 
         public MainWindow()
         {
@@ -152,6 +183,7 @@ namespace KinectControl
                 App.Flags.Keyboard.Key.LEFT_CONTROL,
                 App.Flags.Keyboard.Key.O,
             });
+            Task.Run(MinimizeOSK);
 #endif
             // Set up the mouse hook
             _proc = HookCallback;
@@ -163,7 +195,7 @@ namespace KinectControl
                 UnhookWindowsHookEx(_hookID);
             };
             // Initialize Kinect and program
-            program = new Program(this);
+            var program = new Program(this);
         }
 
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -177,7 +209,6 @@ namespace KinectControl
         private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
         [DllImport("user32.dll")]
         private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool SystemParametersInfo(int uAction, uint uParam, IntPtr lpvParam, int fuWinIni);
         [DllImport("user32.dll")]
@@ -186,15 +217,20 @@ namespace KinectControl
         private static extern IntPtr LoadCursorFromFile(string lpFileName);
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
-
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool UnhookWindowsHookEx(IntPtr hhk);
-
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-
         [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern IntPtr GetModuleHandle(string lpModuleName);
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+        [DllImport("user32.dll")]
+        private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
     }
 }

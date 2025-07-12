@@ -93,7 +93,7 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="ColorManager.cs" />
-    <Compile Include="Controller.cs" />
+    <Compile Include="SystemController.cs" />
     <Compile Include="GestureRecognizer.cs" />
     <Compile Include="Kinect.cs" />
     <Compile Include="MainWindow.xaml.cs">

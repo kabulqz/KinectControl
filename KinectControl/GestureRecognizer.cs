@@ -20,7 +20,9 @@ namespace KinectControl
         public bool isSeated { get; private set; }
         public bool isStoppingCursor { get; private set; }
         public bool isSwitchingLeft { get; private set; }
+        private bool isSwitchingLeft_internal;
         public bool isSwitchingRight { get; private set; }
+        private bool isSwitchingRight_internal;
 
         public GestureRecognizer(KinectSensor kinectSensor)
         {
@@ -56,7 +58,8 @@ namespace KinectControl
             using (var frame = gestureFrameReader.CalculateAndAcquireLatestFrame())
             {
                 var discreteResults = frame?.DiscreteGestureResults;
-                if (discreteResults == null) return;
+                var continuousResults = frame?.ContinuousGestureResults;
+                if (discreteResults == null || continuousResults == null) return;
                 foreach (var gesture in gestureFrameSource.Gestures)
                 {
                     if (gesture.GestureType == GestureType.Discrete)
@@ -106,21 +109,55 @@ namespace KinectControl
                             case @"SwitchMonitor_Left":
                             {
                                 discreteResults.TryGetValue(gesture, out var result);
-                                if (result != null && result.Detected && result.Confidence >= 1.0f)
+                                if (result != null && result.Detected && result.Confidence >= 0.1f)
                                 {
-                                    isSwitchingLeft = true;
+                                    isSwitchingLeft_internal = true;
                                 }
-                                else isSwitchingLeft = false;
+                                else isSwitchingLeft_internal = false;
                                 break;
                             }
                             case @"SwitchMonitor_Right":
                             {
                                 discreteResults.TryGetValue(gesture, out var result);
-                                if (result != null && result.Detected && result.Confidence >= 1.0f)
+                                if (result != null && result.Detected && result.Confidence >= 0.1f)
+                                {
+                                    isSwitchingRight_internal = true;
+                                }
+                                else isSwitchingRight_internal = false;
+                                break;
+                            }
+                        }
+                    }
+                    if (gesture.GestureType == GestureType.Continuous)
+                    {
+                        switch (gesture.Name)
+                        {
+                            case @"SwitchMonitorProgress_Left":
+                            {
+                                continuousResults.TryGetValue(gesture, out var result);
+                                if(isSwitchingLeft_internal && result != null && result.Progress >= 0.75f)
+                                {
+                                    isSwitchingLeft = true;
+                                }
+                                else
+                                {
+                                    isSwitchingLeft = false;
+                                }
+                                isSwitchingRight = false;
+                                break;
+                            }
+                            case @"SwitchMonitorProgress_Right":
+                            {
+                                continuousResults.TryGetValue(gesture, out var result);
+                                if(isSwitchingRight_internal && result != null && result.Progress >= 0.75f)
                                 {
                                     isSwitchingRight = true;
                                 }
-                                else isSwitchingRight = false;
+                                else
+                                {
+                                    isSwitchingRight = false;
+                                }
+                                isSwitchingLeft = false;
                                 break;
                             }
                         }
