@@ -502,9 +502,14 @@ namespace KinectControl
                 isLeftHandInMiniScreen = miniScreen.Contains(leftHandPoint);
             }
 
-            HandleLeftClick(body, screenX, screenY);
-            HandleRightClick(body, isLeftHandInMiniScreen);
-            HandleMiddleClick(body, isLeftHandInMiniScreen);
+            var isRightHandInMIniScreen = false;
+            if (joints.TryGetValue(JointType.HandRight, out var rightHandJoint))
+            {
+                var rightHandPoint = ConvertToScreenSpace(rightHandJoint.Position);
+                isRightHandInMIniScreen = miniScreen.Contains(rightHandPoint);
+            }
+
+            HandleMouseClicks(body, screenX, screenY, isLeftHandInMiniScreen, isRightHandInMIniScreen);
 
             if (!gestureRecognizers[index].isStoppingCursor)
             {
@@ -523,26 +528,48 @@ namespace KinectControl
                 }
             }
         }
-        private void HandleLeftClick(Body body, int screenX, int screenY)
+        private void HandleMouseClicks(Body body, int screenX, int screenY, bool isLeftHandInMiniScreen, bool isRightHandInMiniScreen)
         {
-            var handState = body.HandRightState;
+            var rightHandState = body.HandRightState;
+            var leftHandState = body.HandLeftState;
 
-            if (handState == HandState.Closed)
+            // LMB  pressed by:
+            // right hand always
+            // left hand if it is NOT in the mini screen area
+            HandleLeftClick(screenX, screenY, rightHandState, leftHandState, isLeftHandInMiniScreen);
+
+            // RMB pressed by:
+            // left hand if it is IN the mini screen area
+            HandleRightClick(leftHandState, isLeftHandInMiniScreen);
+
+            // MMB (optional)
+            HandleMiddleClick(rightHandState, leftHandState, isLeftHandInMiniScreen, isRightHandInMiniScreen);
+        }
+        private void HandleLeftClick(int screenX, int screenY, HandState rightHandState,
+            HandState leftHandState, bool isLeftHandInMiniScreen)
+        {
+            bool shouldLeftClick = false;
+
+            if (rightHandState == HandState.Closed)
+            {
+                shouldLeftClick = true;
+            }
+            else if (leftHandState == HandState.Closed && !isLeftHandInMiniScreen)
+            {
+                shouldLeftClick = true;
+            }
+
+            if (shouldLeftClick)
             {
                 if (!isLeftDown)
                 {
                     var now = DateTime.Now;
                     var diff = (now - lastClickTime).TotalMilliseconds;
 
-                    if (diff < DoubleClickThresholdMs)
-                        SystemController.DoubleLeftClick();
-                    else
-                    {
-                        SystemController.LeftDown();
-                    }
+                    if (diff < DoubleClickThresholdMs) SystemController.DoubleLeftClick();
+                    else SystemController.LeftDown();
 
                     lastClickTime = now;
-                        
                     isLeftDown = true;
                     isDragging = false;
                     lastMousePos = new System.Drawing.Point(screenX, screenY);
@@ -552,13 +579,13 @@ namespace KinectControl
                     var dx = screenX - lastMousePos.X;
                     var dy = screenY - lastMousePos.Y;
 
-                    if (!isDragging && (Math.Abs(dx) > 2 || Math.Abs(dy) > 2))
-                        isDragging = true;
+                    if (!isDragging && (Math.Abs(dx) > 2 || Math.Abs(dy) > 2)) isDragging = true;
                 }
             }
-            else if (handState == HandState.Open)
+            else
             {
-                if (isLeftDown)
+                if (isLeftDown && (rightHandState == HandState.Open &&
+                                   (leftHandState == HandState.Open || isLeftHandInMiniScreen)))
                 {
                     SystemController.LeftUp();
                     isLeftDown = false;
@@ -566,13 +593,16 @@ namespace KinectControl
                 }
             }
         }
-        private void HandleRightClick(Body body, bool isLeftHandInMiniScreen)
+        private void HandleRightClick(HandState leftHandState, bool isLeftHandInMiniScreen)
         {
-            if (!isLeftHandInMiniScreen) return;
+            bool shouldRightClick = false;
 
-            var handState = body.HandLeftState;
+            if(leftHandState == HandState.Closed && isLeftHandInMiniScreen)
+            {
+                shouldRightClick = true;
+            }
 
-            if (handState == HandState.Closed)
+            if (shouldRightClick)
             {
                 if (!isRightDown)
                 {
@@ -580,7 +610,7 @@ namespace KinectControl
                     isRightDown = true;
                 }
             }
-            else if (handState == HandState.Open)
+            else
             {
                 if (isRightDown)
                 {
@@ -589,16 +619,12 @@ namespace KinectControl
                 }
             }
         }
-        private void HandleMiddleClick(Body body, bool isLeftHandInMiniScreen)
+        private void HandleMiddleClick(HandState rightHandState, HandState leftHandState, bool isLeftHandInMiniScreen, bool isRightHandInMiniScreen)
         {
-            if (!isLeftHandInMiniScreen) return;
+            bool shouldMiddleClick = rightHandState == HandState.Closed && leftHandState == HandState.Closed &&
+                                     isLeftHandInMiniScreen && isRightHandInMiniScreen;
 
-            var rightState = body.HandRightState;
-            var leftState = body.HandLeftState;
-
-            var bothClosed = rightState == HandState.Closed && leftState == HandState.Closed;
-
-            if (bothClosed)
+            if (shouldMiddleClick)
             {
                 if (!isMiddleDown)
                 {
