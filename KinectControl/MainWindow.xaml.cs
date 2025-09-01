@@ -122,8 +122,8 @@ namespace KinectControl
         private const uint OCR_NORMAL = 32512; // Standard arrow cursor
         private const int SPI_SETCURSORS = 0x0057;
 
-        private const string HandCur = @"../../Src/hand.cur";
-        private const string DragCur = @"../../Src/drag.cur";
+        private const string HandCur = @"vgbtechs/hand.cur";
+        private const string DragCur = @"vgbtechs/drag.cur";
 
         public MainWindow()
         {
@@ -196,11 +196,6 @@ namespace KinectControl
             };
             // Initialize Kinect and program
             var program = new Program(this);
-        }
-
-        private void MainWindow_Loaded(object sender, RoutedEventArgs e)
-        {
-            throw new NotImplementedException();
         }
 
         [DllImport("kernel32.dll")]

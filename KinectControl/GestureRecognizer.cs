@@ -13,7 +13,7 @@ namespace KinectControl
     {
         private readonly VisualGestureBuilderFrameReader gestureFrameReader;
         private readonly VisualGestureBuilderFrameSource gestureFrameSource;
-        private readonly string gestureDatabase = @"../../Src/KinectControlGestures.gbd";
+        private readonly string gestureDatabase = @"vgbtechs/KinectControlGestures.gbd";
 
         public bool isCalibrating { get; private set; }
         public bool isEndingControl { get; private set; }
